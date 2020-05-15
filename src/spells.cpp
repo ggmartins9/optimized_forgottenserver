@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -50,12 +50,12 @@ TalkActionResult_t Spells::playerSaySpell(Player* player, std::string& words, co
 	if (instantWords.size() >= 4 && instantWords.front() != '"') {
 		size_t param_find = instantWords.find('"');
 		if (param_find != std::string::npos && instantWords[param_find - 1] == ' ') {
-			if (instantWords.back() == '"') {
-				instantWords.pop_back();
-			}
-			param = instantWords.substr(param_find + 1);
+			param = words.substr(param_find + 1);
 			instantWords = instantWords.substr(0, param_find);
 			trim_right(instantWords, ' ');
+			if (!param.empty() && param.back() == '"') {
+				param.pop_back();
+			}
 		}
 	}
 
@@ -77,7 +77,7 @@ TalkActionResult_t Spells::playerSaySpell(Player* player, std::string& words, co
 void Spells::clearMaps(bool fromLua)
 {
 	for (auto instant = instants.begin(); instant != instants.end(); ) {
-		if (fromLua == instant->second.fromLua) {
+		if (fromLua == instant->second->fromLua) {
 			instant = instants.erase(instant);
 		} else {
 			++instant;
@@ -124,7 +124,8 @@ bool Spells::registerEvent(Event_ptr event, const pugi::xml_node&)
 {
 	InstantSpell* instant = dynamic_cast<InstantSpell*>(event.get());
 	if (instant) {
-		auto result = instants.emplace(instant->getWords(), std::move(*instant));
+		InstantSpell_ptr instptr{ static_cast<InstantSpell*>(event.release()) };
+		auto result = instants.emplace(instant->getWords(), std::move(instptr));
 		if (!result.second) {
 			std::cout << "[Warning - Spells::registerEvent] Duplicate registered instant spell with words: " << instant->getWords() << std::endl;
 		}
@@ -145,10 +146,10 @@ bool Spells::registerEvent(Event_ptr event, const pugi::xml_node&)
 
 bool Spells::registerInstantLuaEvent(InstantSpell* event)
 {
-	InstantSpell_ptr instant { event };
+	InstantSpell_ptr instant{ event };
 	if (instant) {
 		std::string words = instant->getWords();
-		auto result = instants.emplace(instant->getWords(), std::move(*instant));
+		auto result = instants.emplace(instant->getWords(), std::move(instant));
 		if (!result.second) {
 			std::cout << "[Warning - Spells::registerInstantLuaEvent] Duplicate registered instant spell with words: " << words << std::endl;
 		}
@@ -178,9 +179,9 @@ std::vector<uint16_t> Spells::getSpellsByVocation(uint16_t vocationId)
 	std::vector<uint16_t> spells;
 	spells.reserve(30);
 	for (const auto& it : instants) {
-		VocSpellMap map = it.second.getVocMap();
-		if (map.find(vocationId)->second) {
-			spells.emplace_back(it.second.getId());
+		VocSpellMap map = it.second->getVocMap();
+		if (map.find(vocationId) != map.end()) {
+			spells.emplace_back(it.second->getId());
 		}
 	}
 	return spells;
@@ -223,7 +224,7 @@ InstantSpell* Spells::getInstantSpell(const std::string& words)
 {
 	auto it = instants.find(words);
 	if (it != instants.end()) {
-		return &it->second;
+		return it->second.get();
 	}
 	return nullptr;
 }
@@ -231,8 +232,8 @@ InstantSpell* Spells::getInstantSpell(const std::string& words)
 InstantSpell* Spells::getInstantSpellById(uint32_t spellId)
 {
 	for (auto& it : instants) {
-		if (it.second.getId() == spellId) {
-			return &it.second;
+		if (it.second->getId() == spellId) {
+			return it.second.get();
 		}
 	}
 	return nullptr;
@@ -241,8 +242,8 @@ InstantSpell* Spells::getInstantSpellById(uint32_t spellId)
 InstantSpell* Spells::getInstantSpellByName(const std::string& name)
 {
 	for (auto& it : instants) {
-		if (strcasecmp(it.second.getName().c_str(), name.c_str()) == 0) {
-			return &it.second;
+		if (strcasecmp(it.second->getName().c_str(), name.c_str()) == 0) {
+			return it.second.get();
 		}
 	}
 	return nullptr;
@@ -264,12 +265,17 @@ CombatSpell::~CombatSpell()
 {
 	if (!scripted) {
 		delete combat;
+	} else if (combat) {
+		combat->decrementReferenceCounter();
 	}
 }
 
 bool CombatSpell::loadScriptCombat()
 {
 	combat = g_luaEnvironment.getCombatObject(g_luaEnvironment.lastCombatId);
+	if (combat) {
+		combat->incrementReferenceCounter();
+	}
 	return combat != nullptr;
 }
 

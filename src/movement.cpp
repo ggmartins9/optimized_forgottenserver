@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -754,7 +754,7 @@ uint32_t MoveEvent::EquipItem(MoveEvent* moveEvent, Player* player, Item* item, 
 	}
 
 	if (needUpdateSkills) {
-		player->sendSkills();
+		player->addScheduledUpdates(PlayerUpdate_Skills);
 	}
 
 	//stat modifiers
@@ -773,7 +773,12 @@ uint32_t MoveEvent::EquipItem(MoveEvent* moveEvent, Player* player, Item* item, 
 	}
 
 	if (needUpdateStats) {
-		player->sendStats();
+		#if CLIENT_VERSION >= 1200
+		//We have magic level in skills now so we need to send skills update too here
+		player->addScheduledUpdates((PlayerUpdate_Stats | PlayerUpdate_Skills));
+		#else
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+		#endif
 	}
 
 	return 1;
@@ -835,7 +840,7 @@ uint32_t MoveEvent::DeEquipItem(MoveEvent*, Player* player, Item* item, slots_t 
 	}
 
 	if (needUpdateSkills) {
-		player->sendSkills();
+		player->addScheduledUpdates(PlayerUpdate_Skills);
 	}
 
 	//stat modifiers
@@ -854,7 +859,12 @@ uint32_t MoveEvent::DeEquipItem(MoveEvent*, Player* player, Item* item, slots_t 
 	}
 
 	if (needUpdateStats) {
-		player->sendStats();
+		#if CLIENT_VERSION >= 1200
+		//We have magic level in skills now so we need to send skills update too here
+		player->addScheduledUpdates((PlayerUpdate_Stats | PlayerUpdate_Skills));
+		#else
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+		#endif
 	}
 
 	return 1;
@@ -980,7 +990,7 @@ uint32_t MoveEvent::fireAddRemItem(Item* item, Item* tileItem, const Position& p
 
 bool MoveEvent::executeAddRemItem(Item* item, Item* tileItem, const Position& pos)
 {
-	//onaddItem(moveitem, tileitem, pos)
+	//onAddItem(moveitem, tileitem, pos)
 	//onRemoveItem(moveitem, tileitem, pos)
 	if (!scriptInterface->reserveScriptEnv()) {
 		std::cout << "[Error - MoveEvent::executeAddRemItem] Call stack overflow" << std::endl;

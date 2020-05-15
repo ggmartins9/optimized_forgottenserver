@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -373,6 +373,8 @@ bool ConditionAttributes::unserializeProp(ConditionAttr_t attr, PropStream& prop
 		return propStream.read<int32_t>(skills[currentSkill++]);
 	} else if (attr == CONDITIONATTR_STATS) {
 		return propStream.read<int32_t>(stats[currentStat++]);
+	} else if (attr == CONDITIONATTR_DISABLEDEFENSE) {
+		return propStream.read<bool>(disableDefense);
 	}
 	return Condition::unserializeProp(attr, propStream);
 }
@@ -390,6 +392,9 @@ void ConditionAttributes::serialize(PropWriteStream& propWriteStream)
 		propWriteStream.write<uint8_t>(CONDITIONATTR_STATS);
 		propWriteStream.write<int32_t>(stats[i]);
 	}
+
+	propWriteStream.write<uint8_t>(CONDITIONATTR_DISABLEDEFENSE);
+	propWriteStream.write<bool>(disableDefense);
 }
 
 bool ConditionAttributes::startCondition(Creature* creature)
@@ -445,7 +450,12 @@ void ConditionAttributes::updateStats(Player* player)
 	}
 
 	if (needUpdateStats) {
-		player->sendStats();
+		#if CLIENT_VERSION >= 1200
+		//We have magic level in skills now so we need to send skills update too here
+		player->addScheduledUpdates((PlayerUpdate_Stats | PlayerUpdate_Skills));
+		#else
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+		#endif
 	}
 }
 
@@ -480,7 +490,7 @@ void ConditionAttributes::updateSkills(Player* player)
 	}
 
 	if (needUpdateSkills) {
-		player->sendSkills();
+		player->addScheduledUpdates(PlayerUpdate_Skills);
 	}
 }
 
@@ -510,7 +520,7 @@ void ConditionAttributes::endCondition(Creature* creature)
 		}
 
 		if (needUpdateSkills) {
-			player->sendSkills();
+			player->addScheduledUpdates(PlayerUpdate_Skills);
 		}
 
 		bool needUpdateStats = false;
@@ -523,7 +533,12 @@ void ConditionAttributes::endCondition(Creature* creature)
 		}
 
 		if (needUpdateStats) {
-			player->sendStats();
+			#if CLIENT_VERSION >= 1200
+			//We have magic level in skills now so we need to send skills update too here
+			player->addScheduledUpdates((PlayerUpdate_Stats | PlayerUpdate_Skills));
+			#else
+			player->addScheduledUpdates(PlayerUpdate_Stats);
+			#endif
 		}
 	}
 
@@ -1641,12 +1656,16 @@ void ConditionSpellCooldown::addCondition(Creature* creature, const Condition* c
 	if (updateCondition(condition)) {
 		setTicks(condition->getTicks());
 
+		#if CLIENT_VERSION >= 870
 		if (subId != 0 && ticks > 0) {
 			Player* player = creature->getPlayer();
 			if (player) {
 				player->sendSpellCooldown(subId, ticks);
 			}
 		}
+		#else
+		(void)creature;
+		#endif
 	}
 }
 
@@ -1656,12 +1675,16 @@ bool ConditionSpellCooldown::startCondition(Creature* creature)
 		return false;
 	}
 
+	#if CLIENT_VERSION >= 870
 	if (subId != 0 && ticks > 0) {
 		Player* player = creature->getPlayer();
 		if (player) {
 			player->sendSpellCooldown(subId, ticks);
 		}
 	}
+	#else
+	(void)creature;
+	#endif
 	return true;
 }
 
@@ -1670,12 +1693,16 @@ void ConditionSpellGroupCooldown::addCondition(Creature* creature, const Conditi
 	if (updateCondition(condition)) {
 		setTicks(condition->getTicks());
 
+		#if CLIENT_VERSION >= 870
 		if (subId != 0 && ticks > 0) {
 			Player* player = creature->getPlayer();
 			if (player) {
 				player->sendSpellGroupCooldown(static_cast<SpellGroup_t>(subId), ticks);
 			}
 		}
+		#else
+		(void)creature;
+		#endif
 	}
 }
 
@@ -1685,11 +1712,15 @@ bool ConditionSpellGroupCooldown::startCondition(Creature* creature)
 		return false;
 	}
 
+	#if CLIENT_VERSION >= 870
 	if (subId != 0 && ticks > 0) {
 		Player* player = creature->getPlayer();
 		if (player) {
 			player->sendSpellGroupCooldown(static_cast<SpellGroup_t>(subId), ticks);
 		}
 	}
+	#else
+	(void)creature;
+	#endif
 	return true;
 }

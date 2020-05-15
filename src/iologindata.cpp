@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 
 #include "otpch.h"
 
+#include "databasetasks.h"
 #include "iologindata.h"
 #include "configmanager.h"
 #include "game.h"
@@ -115,15 +116,24 @@ bool IOLoginData::loginserverAuthentication(const std::string& name, const std::
 	return true;
 }
 
+#if GAME_FEATURE_SESSIONKEY > 0
 uint32_t IOLoginData::gameworldAuthentication(const std::string& accountName, const std::string& password, std::string& characterName, std::string& token, uint32_t tokenTime)
+#else
+uint32_t IOLoginData::gameworldAuthentication(const std::string& accountName, const std::string& password, std::string& characterName)
+#endif
 {
 	std::ostringstream query;
+	#if GAME_FEATURE_SESSIONKEY > 0
 	query << "SELECT `id`, `password`, `secret` FROM `accounts` WHERE `name` = " << g_database.escapeString(accountName);
+	#else
+	query << "SELECT `id`, `password` FROM `accounts` WHERE `name` = " << g_database.escapeString(accountName);
+	#endif
 	DBResult_ptr result = g_database.storeQuery(query.str());
 	if (!result) {
 		return 0;
 	}
 
+	#if GAME_FEATURE_SESSIONKEY > 0
 	std::string secret = decodeSecret(result->getString("secret"));
 	if (!secret.empty()) {
 		if (token.empty()) {
@@ -135,6 +145,7 @@ uint32_t IOLoginData::gameworldAuthentication(const std::string& accountName, co
 			return 0;
 		}
 	}
+	#endif
 
 	if (transformToSHA1(password) != result->getString("password")) {
 		return 0;
@@ -231,10 +242,11 @@ bool IOLoginData::preloadPlayer(Player* player, const std::string& name)
 		Guild* guild = g_game.getGuild(guildId);
 		if (!guild) {
 			guild = IOGuild::loadGuild(guildId);
-			g_game.addGuild(guild);
 		}
 
 		if (guild) {
+			g_game.addGuild(guild);
+
 			player->guild = guild;
 			const GuildRank* rank = guild->getRankById(playerRankId);
 			if (!rank) {
@@ -346,7 +358,6 @@ void IOLoginData::loadItems(ItemBlockList& itemMap, DBResult_ptr result, PropStr
 		}
 	}
 }
-
 
 bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 {
@@ -537,9 +548,47 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		for (const auto& it : itemMap) {
 			Item* item = it.second;
 			uint32_t pid = static_cast<uint32_t>(it.first);
+			#if GAME_FEATURE_STORE_INBOX > 0 || GAME_FEATURE_PURSE_SLOT > 0
+			if (pid >= 1 && pid <= 11) {
+			#else
 			if (pid >= 1 && pid <= 10) {
+			#endif
 				player->internalAddThing(pid, item);
 				item->startDecaying();
+			}
+		}
+	}
+
+	#if GAME_FEATURE_STORE_INBOX > 0
+	if (!player->inventory[CONST_SLOT_STORE_INBOX]) {
+		player->internalAddThing(CONST_SLOT_STORE_INBOX, Item::CreateItem(ITEM_STORE_INBOX));
+	}
+	#elif GAME_FEATURE_PURSE_SLOT > 0
+	if (!player->inventory[CONST_SLOT_PURSE]) {
+		player->internalAddThing(CONST_SLOT_PURSE, Item::CreateItem(ITEM_PURSE));
+	}
+	#endif
+
+	//load depot locker items
+	itemMap.clear();
+
+	query.str(std::string());
+	query << "SELECT `depotlockeritems` FROM `players` WHERE `id` = " << player->getGUID();
+	if ((result = g_database.storeQuery(query.str()))) {
+		attr = result->getStream("depotlockeritems", attrSize);
+		propStream.init(attr, attrSize);
+		loadItems(itemMap, result, propStream);
+		for (const auto& it : itemMap) {
+			Item* item = it.second;
+			uint32_t pid = static_cast<uint32_t>(it.first);
+			if (pid >= 0 && pid < 100) {
+				DepotLocker* depotLocker = player->getDepotLocker(pid);
+				if (depotLocker) {
+					depotLocker->internalAddThing(item);
+					item->startDecaying();
+				} else {
+					std::cout << "[Error - IOLoginData::loadPlayer " << item->getID() << "] Cannot load depot locker " << pid << " for player " << player->name << std::endl;
+				}
 			}
 		}
 	}
@@ -568,6 +617,7 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		}
 	}
 
+	#if GAME_FEATURE_MARKET > 0
 	//load inbox items
 	itemMap.clear();
 
@@ -582,6 +632,7 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 			player->getInbox()->internalAddThing(item);
 		}
 	}
+	#endif
 
 	//load vip
 	query.str(std::string());
@@ -600,8 +651,6 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 
 void IOLoginData::saveItem(PropWriteStream& stream, const Item* item)
 {
-	//Reserve a little space before to avoid massive reallocations
-	std::vector<std::pair<const Container*, ItemDeque::const_reverse_iterator>> savingContainers; savingContainers.reserve(100);
 	const Container* container = item->getContainer();
 	if (!container) {
 		// Write ID & props
@@ -609,18 +658,19 @@ void IOLoginData::saveItem(PropWriteStream& stream, const Item* item)
 		item->serializeAttr(stream);
 		stream.write<uint8_t>(0x00); // attr end
 		return;
-	} else {
-		// Write ID & props
-		stream.write<uint16_t>(item->getID());
-		item->serializeAttr(stream);
-
-		// Hack our way into the attributes
-		stream.write<uint8_t>(ATTR_CONTAINER_ITEMS);
-		stream.write<uint32_t>(container->size());
-
-		savingContainers.emplace_back(container, container->getReversedItems());
 	}
 
+	// Write ID & props
+	stream.write<uint16_t>(item->getID());
+	item->serializeAttr(stream);
+
+	// Hack our way into the attributes
+	stream.write<uint8_t>(ATTR_CONTAINER_ITEMS);
+	stream.write<uint32_t>(container->size());
+
+	//Reserve a little space before to avoid massive reallocations
+	std::vector<std::pair<const Container*, ItemDeque::const_reverse_iterator>> savingContainers; savingContainers.reserve(100);
+	savingContainers.emplace_back(container, container->getReversedItems());
 	while (!savingContainers.empty()) {
 		StartSavingContainers:
 		container = savingContainers.back().first;
@@ -669,6 +719,11 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 		if (!g_database.executeQuery(query.str())) {
 			return false;
 		}
+	} else {
+		query << "UPDATE `players` SET `" << table << "` = NULL WHERE `id` = " << player->getGUID();
+		if (!g_database.executeQuery(query.str())) {
+			return false;
+		}
 	}
 	return true;
 }
@@ -701,12 +756,12 @@ bool IOLoginData::savePlayer(Player* player)
 	query << "`health` = " << player->health << ',';
 	query << "`healthmax` = " << player->healthMax << ',';
 	query << "`experience` = " << player->experience << ',';
-	query << "`lookbody` = " << static_cast<uint32_t>(player->defaultOutfit.lookBody) << ',';
-	query << "`lookfeet` = " << static_cast<uint32_t>(player->defaultOutfit.lookFeet) << ',';
-	query << "`lookhead` = " << static_cast<uint32_t>(player->defaultOutfit.lookHead) << ',';
-	query << "`looklegs` = " << static_cast<uint32_t>(player->defaultOutfit.lookLegs) << ',';
+	query << "`lookbody` = " << static_cast<uint16_t>(player->defaultOutfit.lookBody) << ',';
+	query << "`lookfeet` = " << static_cast<uint16_t>(player->defaultOutfit.lookFeet) << ',';
+	query << "`lookhead` = " << static_cast<uint16_t>(player->defaultOutfit.lookHead) << ',';
+	query << "`looklegs` = " << static_cast<uint16_t>(player->defaultOutfit.lookLegs) << ',';
 	query << "`looktype` = " << player->defaultOutfit.lookType << ',';
-	query << "`lookaddons` = " << static_cast<uint32_t>(player->defaultOutfit.lookAddons) << ',';
+	query << "`lookaddons` = " << static_cast<uint16_t>(player->defaultOutfit.lookAddons) << ',';
 	query << "`maglevel` = " << player->magLevel << ',';
 	query << "`mana` = " << player->mana << ',';
 	query << "`manamax` = " << player->manaMax << ',';
@@ -752,6 +807,8 @@ bool IOLoginData::savePlayer(Player* player)
 	propWriteStream.getStream(attributesSize);
 	if (attributesSize > 0) {
 		query << "`spells` = " << g_database.escapeBlob(attributes, attributesSize) << ',';
+	} else {
+		query << "`spells` = NULL,";
 	}
 
 	// storages
@@ -766,6 +823,8 @@ bool IOLoginData::savePlayer(Player* player)
 	attributes = propWriteStream.getStream(attributesSize);
 	if (attributesSize > 0) {
 		query << "`storages` = " << g_database.escapeBlob(attributes, attributesSize) << ',';
+	} else {
+		query << "`storages` = NULL,";
 	}
 
 	if (g_game.getWorldType() != WORLD_TYPE_PVP_ENFORCED) {
@@ -781,7 +840,7 @@ bool IOLoginData::savePlayer(Player* player)
 		} else if (player->skull == SKULL_BLACK) {
 			skull = SKULL_BLACK;
 		}
-		query << "`skull` = " << static_cast<int64_t>(skull) << ',';
+		query << "`skull` = " << static_cast<uint16_t>(skull) << ',';
 	}
 
 	query << "`lastlogout` = " << player->getLastLogout() << ',';
@@ -804,11 +863,11 @@ bool IOLoginData::savePlayer(Player* player)
 	query << "`skill_shielding_tries` = " << player->skills[SKILL_SHIELD].tries << ',';
 	query << "`skill_fishing` = " << player->skills[SKILL_FISHING].level << ',';
 	query << "`skill_fishing_tries` = " << player->skills[SKILL_FISHING].tries << ',';
-	query << "`direction` = " << static_cast<uint16_t> (player->getDirection()) << ',';
+	query << "`direction` = " << static_cast<uint16_t>(player->getDirection()) << ',';
 	if (!player->isOffline()) {
 		query << "`onlinetime` = `onlinetime` + " << (time(nullptr) - player->lastLoginSaved) << ',';
 	}
-	query << "`blessings` = " << static_cast<uint32_t>(player->blessings);
+	query << "`blessings` = " << static_cast<uint16_t>(player->blessings);
 	query << " WHERE `id` = " << player->getGUID();
 
 	DBTransaction transaction(&g_database);
@@ -823,7 +882,11 @@ bool IOLoginData::savePlayer(Player* player)
 	//item saving
 	query.str(std::string());
 	ItemBlockList itemList;
+	#if GAME_FEATURE_STORE_INBOX > 0 || GAME_FEATURE_PURSE_SLOT > 0
+	for (int32_t slotId = 1; slotId <= 11; ++slotId) {
+	#else
 	for (int32_t slotId = 1; slotId <= 10; ++slotId) {
+	#endif
 		Item* item = player->inventory[slotId];
 		if (item) {
 			itemList.emplace_back(slotId, item);
@@ -836,6 +899,29 @@ bool IOLoginData::savePlayer(Player* player)
 	}
 
 	if (player->lastDepotId != -1) {
+		//save depot lockers
+		query.str(std::string());
+		itemList.clear();
+		for (const auto& it : player->depotLockerMap) {
+			DepotLocker* depotLocker = it.second;
+			for (auto item = depotLocker->getReversedItems(), end = depotLocker->getReversedEnd(); item != end; ++item) {
+				uint16_t itemId = (*item)->getID();
+				#if GAME_FEATURE_MARKET > 0
+				if (itemId == ITEM_DEPOT || itemId == ITEM_INBOX || itemId == ITEM_MARKET) {
+				#else
+				if (itemId == ITEM_DEPOT) {
+				#endif
+					continue;
+				}
+				itemList.emplace_back(static_cast<int32_t>(it.first), *item);
+			}
+		}
+
+		propWriteStream.clear();
+		if (!saveItems(player, itemList, query, propWriteStream, "depotlockeritems")) {
+			return false;
+		}
+
 		//save depot items
 		query.str(std::string());
 		itemList.clear();
@@ -852,6 +938,7 @@ bool IOLoginData::savePlayer(Player* player)
 		}
 	}
 
+	#if GAME_FEATURE_MARKET > 0
 	//save inbox items
 	query.str(std::string());
 	itemList.clear();
@@ -863,6 +950,7 @@ bool IOLoginData::savePlayer(Player* player)
 	if (!saveItems(player, itemList, query, propWriteStream, "inboxitems")) {
 		return false;
 	}
+	#endif
 
 	//End the transaction
 	return transaction.commit();
@@ -942,47 +1030,25 @@ bool IOLoginData::hasBiddedOnHouse(uint32_t guid)
 	return g_database.storeQuery(query.str()).get() != nullptr;
 }
 
-std::forward_list<VIPEntry> IOLoginData::getVIPEntries(uint32_t accountId)
-{
-	std::forward_list<VIPEntry> entries;
-
-	std::ostringstream query;
-	query << "SELECT `player_id`, (SELECT `name` FROM `players` WHERE `id` = `player_id`) AS `name`, `description`, `icon`, `notify` FROM `account_viplist` WHERE `account_id` = " << accountId;
-
-	DBResult_ptr result = g_database.storeQuery(query.str());
-	if (result) {
-		do {
-			entries.emplace_front(
-				result->getNumber<uint32_t>("player_id"),
-				result->getString("name"),
-				result->getString("description"),
-				result->getNumber<uint32_t>("icon"),
-				result->getNumber<uint16_t>("notify") != 0
-			);
-		} while (result->next());
-	}
-	return entries;
-}
-
 void IOLoginData::addVIPEntry(uint32_t accountId, uint32_t guid, const std::string& description, uint32_t icon, bool notify)
 {
 	std::ostringstream query;
 	query << "INSERT INTO `account_viplist` (`account_id`, `player_id`, `description`, `icon`, `notify`) VALUES (" << accountId << ',' << guid << ',' << g_database.escapeString(description) << ',' << icon << ',' << notify << ')';
-	g_database.executeQuery(query.str());
+	g_databaseTasks.addTask(query.str());
 }
 
 void IOLoginData::editVIPEntry(uint32_t accountId, uint32_t guid, const std::string& description, uint32_t icon, bool notify)
 {
 	std::ostringstream query;
 	query << "UPDATE `account_viplist` SET `description` = " << g_database.escapeString(description) << ", `icon` = " << icon << ", `notify` = " << notify << " WHERE `account_id` = " << accountId << " AND `player_id` = " << guid;
-	g_database.executeQuery(query.str());
+	g_databaseTasks.addTask(query.str());
 }
 
 void IOLoginData::removeVIPEntry(uint32_t accountId, uint32_t guid)
 {
 	std::ostringstream query;
 	query << "DELETE FROM `account_viplist` WHERE `account_id` = " << accountId << " AND `player_id` = " << guid;
-	g_database.executeQuery(query.str());
+	g_databaseTasks.addTask(query.str());
 }
 
 void IOLoginData::addPremiumDays(uint32_t accountId, int32_t addDays)

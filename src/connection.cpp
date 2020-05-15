@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +18,8 @@
  */
 
 #include "otpch.h"
+
+#include <thread>
 
 #include "configmanager.h"
 #include "connection.h"
@@ -73,8 +75,7 @@ void Connection::close(bool force)
 	connectionState = CONNECTION_STATE_CLOSED;
 
 	if (protocol) {
-		g_dispatcher.addTask(
-			createTask(std::bind(&Protocol::release, protocol)));
+		g_dispatcher.addTask(createTask(std::bind(&Protocol::release, protocol)));
 	}
 
 	if (messageQueue.empty() || force) {
@@ -266,6 +267,7 @@ void Connection::parsePacket(const boost::system::error_code& error)
 		return;
 	}
 
+	bool skipReadingNextPacket = false;
 	if (!receivedFirst) {
 		// First message received
 		receivedFirst = true;
@@ -293,23 +295,38 @@ void Connection::parsePacket(const boost::system::error_code& error)
 				return;
 			}
 		} else {
+			// It is rather hard to detect if we have checksum or sequence method here so let's skip checksum check
+			// it doesn't generate any problem because olders protocol don't use 'server sends first' feature
 			msg.get<uint32_t>();
 			msg.skipBytes(1);    // Skip protocol ID
 		}
 
 		protocol->onRecvFirstMessage(msg);
 	} else {
-		protocol->onRecvMessage(msg);    // Send the packet to the current protocol
+		skipReadingNextPacket = protocol->onRecvMessage(msg); // Send the packet to the current protocol
 	}
 
 	try {
 		readTimer.expires_from_now(boost::posix_time::seconds(CONNECTION_READ_TIMEOUT));
 		readTimer.async_wait(std::bind(&Connection::handleTimeout, std::weak_ptr<Connection>(shared_from_this()), std::placeholders::_1));
 
+		if (!skipReadingNextPacket) {
+			// Wait to the next packet
+			boost::asio::async_read(socket, boost::asio::buffer(msg.getBuffer(), NetworkMessage::HEADER_LENGTH), std::bind(&Connection::parseHeader, shared_from_this(), std::placeholders::_1));
+		}
+	} catch (boost::system::system_error& e) {
+		std::cout << "[Network error - Connection::parsePacket] " << e.what() << std::endl;
+		close(FORCE_CLOSE);
+	}
+}
+
+void Connection::resumeWork()
+{
+	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
+
+	try {
 		// Wait to the next packet
-		boost::asio::async_read(socket,
-		                        boost::asio::buffer(msg.getBuffer(), NetworkMessage::HEADER_LENGTH),
-		                        std::bind(&Connection::parseHeader, shared_from_this(), std::placeholders::_1));
+		boost::asio::async_read(socket, boost::asio::buffer(msg.getBuffer(), NetworkMessage::HEADER_LENGTH), std::bind(&Connection::parseHeader, shared_from_this(), std::placeholders::_1));
 	} catch (boost::system::system_error& e) {
 		std::cout << "[Network error - Connection::parsePacket] " << e.what() << std::endl;
 		close(FORCE_CLOSE);
@@ -326,7 +343,24 @@ void Connection::send(const OutputMessage_ptr& msg)
 	bool noPendingWrite = messageQueue.empty();
 	messageQueue.emplace_back(msg);
 	if (noPendingWrite) {
-		internalSend(msg);
+		// Make asio thread handle xtea encryption instead of dispatcher
+		try {
+			socket.get_io_service().post(std::bind(&Connection::internalWorker, shared_from_this()));
+		} catch (boost::system::system_error& e) {
+			std::cout << "[Network error - Connection::send] " << e.what() << std::endl;
+			messageQueue.clear();
+			close(FORCE_CLOSE);
+		}
+	}
+}
+
+void Connection::internalWorker()
+{
+	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
+	if (!messageQueue.empty()) {
+		internalSend(messageQueue.front());
+	} else if (connectionState == CONNECTION_STATE_CLOSED) {
+		closeSocket();
 	}
 }
 

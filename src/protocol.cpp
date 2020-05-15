@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2018  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@
  */
 
 #include "otpch.h"
+#include "tasks.h"
 
 #include "protocol.h"
 #include "outputmessage.h"
@@ -37,23 +38,67 @@ void Protocol::onSendMessage(const OutputMessage_ptr& msg)
 			} else if (checksumMethod == CHECKSUM_METHOD_ADLER32) {
 				msg->addCryptoHeader(true, adlerChecksum(msg->getOutputBuffer(), msg->getLength()));
 			} else if (checksumMethod == CHECKSUM_METHOD_SEQUENCE) {
-				msg->addCryptoHeader(true, sequenceNumber++);
-				sequenceNumber &= 0x7FFFFFFF;
+				msg->addCryptoHeader(true, ++serverSequenceNumber);
+				if (serverSequenceNumber >= 0x7FFFFFFF) {
+					serverSequenceNumber = 0;
+				}
 			}
 		}
 	}
 }
 
-void Protocol::onRecvMessage(NetworkMessage& msg)
+bool Protocol::onRecvMessage(NetworkMessage& msg)
 {
 	if (checksumMethod != CHECKSUM_METHOD_NONE) {
-		msg.get<uint32_t>();
+		uint32_t recvChecksum = msg.get<uint32_t>();
+		if (checksumMethod == CHECKSUM_METHOD_SEQUENCE) {
+			if (recvChecksum == 0) {
+				// checksum 0 indicate that the packet should be connection ping - 0x1C packet header
+				// since we don't need that packet skip it
+				return false;
+			}
+
+			uint32_t checksum = ++clientSequenceNumber;
+			if (clientSequenceNumber >= 0x7FFFFFFF) {
+				clientSequenceNumber = 0;
+			}
+
+			if (recvChecksum != checksum) {
+				// incorrect packet - skip it
+				return false;
+			}
+		} else {
+			uint32_t checksum;
+			int32_t len = msg.getLength() - msg.getBufferPosition();
+			if (len > 0) {
+				checksum = adlerChecksum(msg.getBuffer() + msg.getBufferPosition(), len);
+			} else {
+				checksum = 0;
+			}
+
+			if (recvChecksum != checksum) {
+				// incorrect packet - skip it
+				return false;
+			}
+		}
 	}
 	if (encryptionEnabled && !XTEA_decrypt(msg)) {
-		return;
+		return false;
 	}
 
-	parsePacket(msg);
+	using ProtocolWeak_ptr = std::weak_ptr<Protocol>;
+	ProtocolWeak_ptr protocolWeak = std::weak_ptr<Protocol>(shared_from_this());
+
+	std::function<void (void)> callback = [protocolWeak, &msg]() {
+		if (auto protocol = protocolWeak.lock()) {
+			if (auto connection = protocol->getConnection()) {
+				protocol->parsePacket(msg);
+				connection->resumeWork();
+			}
+		}
+	};
+	g_dispatcher.addTask(createTask(callback));
+	return true;
 }
 
 OutputMessage_ptr Protocol::getOutputBuffer(int32_t size)
@@ -162,7 +207,8 @@ void Protocol::XTEA_encrypt(OutputMessage& msg) const
 
 bool Protocol::XTEA_decrypt(NetworkMessage& msg) const
 {
-	if (((msg.getLength() - 6) & 7) != 0) {
+	uint16_t msgLength = msg.getLength() - (checksumMethod == CHECKSUM_METHOD_NONE ? 2 : 6);
+	if ((msgLength & 7) != 0) {
 		return false;
 	}
 
@@ -170,13 +216,13 @@ bool Protocol::XTEA_decrypt(NetworkMessage& msg) const
 
 	uint8_t* buffer = msg.getBuffer() + msg.getBufferPosition();
 	#if defined(__AVX512F__)
-	int32_t messageLength = static_cast<int32_t>(msg.getLength() - 6) - 128;
+	int32_t messageLength = static_cast<int32_t>(msgLength) - 128;
 	#elif defined(__AVX2__)
-	int32_t messageLength = static_cast<int32_t>(msg.getLength() - 6) - 64;
+	int32_t messageLength = static_cast<int32_t>(msgLength) - 64;
 	#elif defined(__SSE2__)
-	int32_t messageLength = static_cast<int32_t>(msg.getLength() - 6) - 32;
+	int32_t messageLength = static_cast<int32_t>(msgLength) - 32;
 	#else
-	int32_t messageLength = static_cast<int32_t>(msg.getLength() - 6);
+	int32_t messageLength = static_cast<int32_t>(msgLength);
 	#endif
 	int32_t readPos = 0;
 	const uint32_t k[] = {key[0], key[1], key[2], key[3]};
@@ -249,8 +295,8 @@ bool Protocol::XTEA_decrypt(NetworkMessage& msg) const
 		readPos += 8;
 	}
 
-	int innerLength = msg.get<uint16_t>();
-	if (innerLength > msg.getLength() - 8) {
+	uint16_t innerLength = msg.get<uint16_t>();
+	if (innerLength > msgLength - 2) {
 		return false;
 	}
 
@@ -265,7 +311,7 @@ bool Protocol::RSA_decrypt(NetworkMessage& msg)
 	}
 
 	g_RSA.decrypt(reinterpret_cast<char*>(msg.getBuffer()) + msg.getBufferPosition()); //does not break strict aliasing
-	return msg.getByte() == 0;
+	return (msg.getByte() == 0);
 }
 
 uint32_t Protocol::getIP() const

@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,6 +30,7 @@
 extern ConfigManager g_config;
 extern Game g_game;
 
+#if GAME_FEATURE_MARKET > 0
 MarketOfferList IOMarket::getActiveOffers(MarketAction_t action, uint16_t itemId)
 {
 	MarketOfferList offerList;
@@ -231,6 +232,7 @@ MarketOfferEx IOMarket::getOfferByCounter(uint32_t timestamp, uint16_t counter)
 	DBResult_ptr result = g_database.storeQuery(query.str());
 	if (!result) {
 		offer.id = 0;
+		offer.playerId = 0;
 		return offer;
 	}
 
@@ -343,3 +345,4 @@ MarketStatistics* IOMarket::getSaleStatistics(uint16_t itemId)
 	}
 	return &it->second;
 }
+#endif

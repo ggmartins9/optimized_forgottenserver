@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -434,6 +434,7 @@ class LuaScriptInterface
 		static bool getArea(lua_State* L, std::list<uint32_t>& list, uint32_t& rows);
 
 		//lua functions
+		static int luaFastRelocate(lua_State* L);
 		static int luaDoPlayerAddItem(lua_State* L);
 		static int luaDoSetCreatureLight(lua_State* L);
 
@@ -522,6 +523,11 @@ class LuaScriptInterface
 
 		// os
 		static int luaSystemTime(lua_State* L);
+
+		// math
+		static int luaMathUniformRandom(lua_State* L);
+		static int luaMathNormalRandom(lua_State* L);
+		static int luaMathBoolRandom(lua_State* L);
 
 		// table
 		static int luaTableCreate(lua_State* L);
@@ -643,6 +649,8 @@ class LuaScriptInterface
 
 		static int luaNetworkMessageReset(lua_State* L);
 		static int luaNetworkMessageSkipBytes(lua_State* L);
+		static int luaNetworkMessageGetMsgPosition(lua_State* L);
+		static int luaNetworkMessageSetMsgPosition(lua_State* L);
 		static int luaNetworkMessageSendToPlayer(lua_State* L);
 
 		// ModalWindow
@@ -826,6 +834,7 @@ class LuaScriptInterface
 		static int luaPlayerCreate(lua_State* L);
 
 		static int luaPlayerIsPlayer(lua_State* L);
+		static int luaPlayerSetName(lua_State* L);
 
 		static int luaPlayerGetGuid(lua_State* L);
 		static int luaPlayerGetIp(lua_State* L);
@@ -841,8 +850,11 @@ class LuaScriptInterface
 
 		static int luaPlayerGetFreeCapacity(lua_State* L);
 
+		static int luaPlayerGetDepotLocker(lua_State* L);
 		static int luaPlayerGetDepotChest(lua_State* L);
+		#if GAME_FEATURE_MARKET > 0
 		static int luaPlayerGetInbox(lua_State* L);
+		#endif
 
 		static int luaPlayerGetSkullTime(lua_State* L);
 		static int luaPlayerSetSkullTime(lua_State* L);
@@ -947,9 +959,11 @@ class LuaScriptInterface
 		static int luaPlayerHasOutfit(lua_State* L);
 		static int luaPlayerSendOutfitWindow(lua_State* L);
 
+		#if GAME_FEATURE_MOUNTS > 0
 		static int luaPlayerAddMount(lua_State* L);
 		static int luaPlayerRemoveMount(lua_State* L);
 		static int luaPlayerHasMount(lua_State* L);
+		#endif
 
 		static int luaPlayerGetPremiumDays(lua_State* L);
 		static int luaPlayerAddPremiumDays(lua_State* L);
@@ -982,7 +996,9 @@ class LuaScriptInterface
 
 		static int luaPlayerGetContainerId(lua_State* L);
 		static int luaPlayerGetContainerById(lua_State* L);
+		#if GAME_FEATURE_CONTAINER_PAGINATION > 0
 		static int luaPlayerGetContainerIndex(lua_State* L);
+		#endif
 
 		static int luaPlayerGetInstantSpells(lua_State* L);
 		static int luaPlayerCanCast(lua_State* L);
@@ -1178,6 +1194,7 @@ class LuaScriptInterface
 
 		// Combat
 		static int luaCombatCreate(lua_State* L);
+		static int luaCombatDelete(lua_State* L);
 
 		static int luaCombatSetParameter(lua_State* L);
 		static int luaCombatSetFormula(lua_State* L);

@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -89,6 +89,20 @@ class PropStream
 
 			memcpy(&ret, p, sizeof(T));
 			p += sizeof(T);
+			return true;
+		}
+
+		bool readString(std::string& ret, uint16_t strLen) {
+			if (size() < strLen) {
+				return false;
+			}
+
+			char* str = new char[strLen + 1];
+			memcpy(str, p, strLen);
+			str[strLen] = 0;
+			ret.assign(str, strLen);
+			delete[] str;
+			p += strLen;
 			return true;
 		}
 

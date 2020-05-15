@@ -1,6 +1,6 @@
 /**
  * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ * Copyright (C) 2020  Mark Samman <mark.samman@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -98,6 +98,7 @@ bool Npc::load()
 void Npc::reset()
 {
 	loaded = false;
+	isIdle = true;
 	walkTicks = 1500;
 	pushable = true;
 	floorChange = false;
@@ -206,7 +207,9 @@ bool Npc::loadFromXml()
 		} else if ((attr = lookNode.attribute("typeex"))) {
 			defaultOutfit.lookTypeEx = pugi::cast<uint16_t>(attr.value());
 		}
+		#if GAME_FEATURE_MOUNTS > 0
 		defaultOutfit.lookMount = pugi::cast<uint16_t>(lookNode.attribute("mount").value());
+		#endif
 
 		currentOutfit = defaultOutfit;
 	}
@@ -364,7 +367,6 @@ void Npc::onPlayerTrade(Player* player, int32_t callback, uint16_t itemId, uint8
 	if (npcEventHandler) {
 		npcEventHandler->onPlayerTrade(player, callback, itemId, count, amount, ignore, inBackpacks);
 	}
-	player->sendSaleItemList();
 }
 
 void Npc::onPlayerEndTrade(Player* player, int32_t buyCallback, int32_t sellCallback)
@@ -795,24 +797,23 @@ int NpcScriptInterface::luaOpenShopWindow(lua_State* L)
 		return 1;
 	}
 
-	std::list<ShopInfo> items;
+	std::vector<ShopInfo> items;
 	lua_pushnil(L);
 	while (lua_next(L, -2) != 0) {
 		const auto tableIndex = lua_gettop(L);
-		ShopInfo item;
 
-		item.itemId = getField<uint32_t>(L, tableIndex, "id");
-		item.subType = getField<int32_t>(L, tableIndex, "subType");
-		if (item.subType == 0) {
-			item.subType = getField<int32_t>(L, tableIndex, "subtype");
+		uint16_t itemId = static_cast<uint16_t>(getField<uint32_t>(L, tableIndex, "id"));
+		int32_t subType = getField<int32_t>(L, tableIndex, "subType");
+		if (subType == 0) {
+			subType = getField<int32_t>(L, tableIndex, "subtype");
 			lua_pop(L, 1);
 		}
 
-		item.buyPrice = getField<uint32_t>(L, tableIndex, "buy");
-		item.sellPrice = getField<uint32_t>(L, tableIndex, "sell");
-		item.realName = getFieldString(L, tableIndex, "name");
+		uint32_t buyPrice = getField<uint32_t>(L, tableIndex, "buy");
+		uint32_t sellPrice = getField<uint32_t>(L, tableIndex, "sell");
+		std::string realName = getFieldString(L, tableIndex, "name");
 
-		items.push_back(item);
+		items.emplace_back(itemId, subType, buyPrice, sellPrice, std::move(realName));
 		lua_pop(L, 6);
 	}
 	lua_pop(L, 1);
@@ -1014,25 +1015,23 @@ int NpcScriptInterface::luaNpcOpenShopWindow(lua_State* L)
 		buyCallback = luaL_ref(L, LUA_REGISTRYINDEX);
 	}
 
-	std::list<ShopInfo> items;
-
+	std::vector<ShopInfo> items;
 	lua_pushnil(L);
 	while (lua_next(L, 3) != 0) {
 		const auto tableIndex = lua_gettop(L);
-		ShopInfo item;
 
-		item.itemId = getField<uint32_t>(L, tableIndex, "id");
-		item.subType = getField<int32_t>(L, tableIndex, "subType");
-		if (item.subType == 0) {
-			item.subType = getField<int32_t>(L, tableIndex, "subtype");
+		uint16_t itemId = static_cast<uint16_t>(getField<uint32_t>(L, tableIndex, "id"));
+		int32_t subType = getField<int32_t>(L, tableIndex, "subType");
+		if (subType == 0) {
+			subType = getField<int32_t>(L, tableIndex, "subtype");
 			lua_pop(L, 1);
 		}
 
-		item.buyPrice = getField<uint32_t>(L, tableIndex, "buy");
-		item.sellPrice = getField<uint32_t>(L, tableIndex, "sell");
-		item.realName = getFieldString(L, tableIndex, "name");
+		uint32_t buyPrice = getField<uint32_t>(L, tableIndex, "buy");
+		uint32_t sellPrice = getField<uint32_t>(L, tableIndex, "sell");
+		std::string realName = getFieldString(L, tableIndex, "name");
 
-		items.push_back(item);
+		items.emplace_back(itemId, subType, buyPrice, sellPrice, std::move(realName));
 		lua_pop(L, 6);
 	}
 	lua_pop(L, 1);
