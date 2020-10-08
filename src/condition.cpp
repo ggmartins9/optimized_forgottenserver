@@ -706,7 +706,28 @@ bool ConditionAttributes::setParam(ConditionParam_t param, int32_t value)
 	}
 }
 
-void ConditionRegeneration::addCondition(Creature*, const Condition* condition)
+#if GAME_FEATURE_REGENERATION_TIME > 0
+bool ConditionRegeneration::startCondition(Creature* creature)
+{
+	if (!Condition::startCondition(creature)) {
+		return false;
+	}
+
+	if (Player* player = creature->getPlayer()) {
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+	}
+	return true;
+}
+
+void ConditionRegeneration::endCondition(Creature* creature)
+{
+	if (Player* player = creature->getPlayer()) {
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+	}
+}
+#endif
+
+void ConditionRegeneration::addCondition(Creature* creature, const Condition* condition)
 {
 	if (updateCondition(condition)) {
 		setTicks(condition->getTicks());
@@ -719,6 +740,14 @@ void ConditionRegeneration::addCondition(Creature*, const Condition* condition)
 		healthGain = conditionRegen.healthGain;
 		manaGain = conditionRegen.manaGain;
 	}
+
+	#if GAME_FEATURE_REGENERATION_TIME > 0
+	if (Player* player = creature->getPlayer()) {
+		player->addScheduledUpdates(PlayerUpdate_Stats);
+	}
+	#else
+	(void)creature;
+	#endif
 }
 
 bool ConditionRegeneration::unserializeProp(ConditionAttr_t attr, PropStream& propStream)
@@ -1623,6 +1652,10 @@ bool ConditionLight::unserializeProp(ConditionAttr_t attr, PropStream& propStrea
 
 		lightInfo.level = value;
 		return true;
+	} else if (attr == CONDITIONATTR_LIGHTCOLOR_8B) {
+		return propStream.read<uint8_t>(lightInfo.color);
+	} else if (attr == CONDITIONATTR_LIGHTLEVEL_8B) {
+		return propStream.read<uint8_t>(lightInfo.level);
 	} else if (attr == CONDITIONATTR_LIGHTTICKS) {
 		return propStream.read<uint32_t>(internalLightTicks);
 	} else if (attr == CONDITIONATTR_LIGHTINTERVAL) {
@@ -1635,14 +1668,11 @@ void ConditionLight::serialize(PropWriteStream& propWriteStream)
 {
 	Condition::serialize(propWriteStream);
 
-	// TODO: color and level could be serialized as 8-bit if we can retain backwards
-	// compatibility, but perhaps we should keep it like this in case they increase
-	// in the future...
-	propWriteStream.write<uint8_t>(CONDITIONATTR_LIGHTCOLOR);
-	propWriteStream.write<uint32_t>(lightInfo.color);
+	propWriteStream.write<uint8_t>(CONDITIONATTR_LIGHTCOLOR_8B);
+	propWriteStream.write<uint8_t>(lightInfo.color);
 
-	propWriteStream.write<uint8_t>(CONDITIONATTR_LIGHTLEVEL);
-	propWriteStream.write<uint32_t>(lightInfo.level);
+	propWriteStream.write<uint8_t>(CONDITIONATTR_LIGHTLEVEL_8B);
+	propWriteStream.write<uint8_t>(lightInfo.level);
 
 	propWriteStream.write<uint8_t>(CONDITIONATTR_LIGHTTICKS);
 	propWriteStream.write<uint32_t>(internalLightTicks);

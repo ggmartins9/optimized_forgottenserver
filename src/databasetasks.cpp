@@ -32,6 +32,9 @@ void DatabaseTasks::threadMain()
 	while (getState() != THREAD_STATE_TERMINATED) {
 		taskLockUnique.lock();
 		if (tasks.empty()) {
+			if (flushTasks) {
+				flushSignal.notify_one();
+			}
 			taskSignal.wait(taskLockUnique);
 		}
 
@@ -76,27 +79,23 @@ void DatabaseTasks::runTask(const DatabaseTask& task)
 	}
 
 	if (task.callback) {
-		g_dispatcher.addTask(createTask(std::bind(task.callback, result, success)));
+		g_dispatcher.addTask(std::bind(task.callback, result, success));
 	}
 }
 
 void DatabaseTasks::flush()
 {
 	std::unique_lock<std::mutex> guard{ taskLock };
-	while (!tasks.empty()) {
-		auto task = std::move(tasks.front());
-		tasks.pop_front();
-		guard.unlock();
-		runTask(task);
-		guard.lock();
+	if (!tasks.empty()) {
+		flushTasks = true;
+		flushSignal.wait(guard);
+		flushTasks = false;
 	}
 }
 
 void DatabaseTasks::shutdown()
 {
-	taskLock.lock();
-	setState(THREAD_STATE_TERMINATED);
-	taskLock.unlock();
 	flush();
+	setState(THREAD_STATE_TERMINATED);
 	taskSignal.notify_one();
 }

@@ -23,9 +23,18 @@
 #include "spells.h"
 #include "movement.h"
 #include "weapons.h"
-
-#include <boost/filesystem.hpp>
 #include "pugicast.h"
+
+#ifdef __cpp_lib_filesystem
+#include <filesystem>
+namespace fs = std::filesystem;
+#elif __cpp_lib_experimental_filesystem
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#else
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+#endif
 
 extern MoveEvents* g_moveEvents;
 extern Weapons* g_weapons;
@@ -183,7 +192,7 @@ constexpr auto OTBI = OTB::Identifier{{'O','T', 'B', 'I'}};
 
 bool Items::loadFromOtb(const std::string& file)
 {
-	if (!boost::filesystem::exists(file)) {
+	if (!fs::exists(file)) {
 		std::cout << "[Error - Items::loadFromOtb] Failed to load " << file << ": File doesn't exist." << std::endl;
 		return false;
 	}
@@ -1893,8 +1902,8 @@ uint16_t Items::getItemIdByName(const std::string& name)
 	size_t nameSize = compare.length();
 	const char* itemName = compare.c_str();
 	for (size_t i = 100, size = items.size(); i < size; ++i) {
-		const std::string& compareName = asLowerCaseString(items[i].name);
-		if (nameSize == compareName.length() && !tfs_strncmp(itemName, compareName.c_str(), nameSize)) {
+		ItemType& it = items[i];
+		if (nameSize == it.name.length() && !tfs_strncmp(itemName, asLowerCaseString(it.name).c_str(), nameSize)) {
 			return i;
 		}
 	}

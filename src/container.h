@@ -149,12 +149,13 @@ class Container : public Item, public Cylinder
 		void internalAddThing(Thing* thing) override final;
 		void internalAddThing(uint32_t index, Thing* thing) override final;
 		void startDecaying() override final;
+		void stopDecaying() override final;
 
 	protected:
 		ItemDeque itemlist;
 
 	private:
-		std::ostringstream& getContentDescription(std::ostringstream& os) const;
+		std::string& getContentDescription(std::stringExtended& sink) const;
 
 		uint32_t maxSize;
 		uint32_t totalWeight = 0;

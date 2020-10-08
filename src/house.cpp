@@ -34,16 +34,17 @@ House::House(uint32_t houseId) : id(houseId) {}
 
 void House::addTile(HouseTile* tile)
 {
-	tile->setFlag(TILESTATE_PROTECTIONZONE);
 	houseTiles.push_back(tile);
+	houseTiles.shrink_to_fit();
+	tile->setFlag(TILESTATE_PROTECTIONZONE);
 }
 
 void House::setOwner(uint32_t guid, bool updateDatabase/* = true*/, Player* player/* = nullptr*/)
 {
 	if (updateDatabase && owner != guid) {
-		std::ostringstream query;
+		std::stringExtended query(256);
 		query << "UPDATE `houses` SET `owner` = " << guid << ", `bid` = 0, `bid_end` = 0, `last_bid` = 0, `highest_bidder` = 0  WHERE `id` = " << id;
-		g_database.executeQuery(query.str());
+		g_database.executeQuery(query);
 	}
 
 	if (isLoaded && owner == guid) {
@@ -116,7 +117,7 @@ void House::setOwner(uint32_t guid, bool updateDatabase/* = true*/, Player* play
 
 void House::updateDoorDescription() const
 {
-	std::ostringstream ss;
+	std::stringExtended ss(houseName.length() + ownerName.length() + static_cast<size_t>(128));
 	if (owner != 0) {
 		ss << "It belongs to house '" << houseName << "'. " << ownerName << " owns this house.";
 	} else {
@@ -129,7 +130,7 @@ void House::updateDoorDescription() const
 	}
 
 	for (const auto& it : doorSet) {
-		it->setSpecialDescription(ss.str());
+		it->setSpecialDescription(ss);
 	}
 }
 
@@ -240,7 +241,8 @@ bool House::transferToDepot(Player* player) const
 	ItemList moveItemList;
 	for (HouseTile* tile : houseTiles) {
 		if (const TileItemVector* items = tile->getItemList()) {
-			for (Item* item : *items) {
+			for (auto it = items->rbegin(), end = items->rend(); it != end; ++it) {
+				Item* item = (*it);
 				if (item->isPickupable()) {
 					moveItemList.push_back(item);
 				} else {
@@ -275,6 +277,7 @@ bool House::transferToDepot(Player* player) const
 				#if GAME_FEATURE_MARKET > 0
 				g_game.internalAddItem(player->getInbox(), parcel, INDEX_WHEREEVER, FLAG_NOLIMIT);
 				#else
+				player->setLastDepotId(static_cast<int16_t>(townId));
 				g_game.internalAddItem(player->getDepotLocker(townId), parcel, INDEX_WHEREEVER, FLAG_NOLIMIT);
 				#endif
 				return true;
@@ -289,6 +292,7 @@ bool House::transferToDepot(Player* player) const
 		}
 		#else
 		DepotLocker* depot = player->getDepotLocker(townId);
+		player->setLastDepotId(static_cast<int16_t>(townId));
 		for (Item* item : moveItemList) {
 			g_game.internalMoveItem(item->getParent(), depot, INDEX_WHEREEVER, item, item->getItemCount(), nullptr, FLAG_NOLIMIT);
 		}
@@ -323,23 +327,26 @@ bool House::isInvited(const Player* player)
 void House::addDoor(Door* door)
 {
 	door->incrementReferenceCounter();
-	doorSet.insert(door);
+	doorSet.push_back(door);
+	doorSet.shrink_to_fit();
 	door->setHouse(this);
 	updateDoorDescription();
 }
 
 void House::removeDoor(Door* door)
 {
-	auto it = doorSet.find(door);
+	auto it = std::find(doorSet.begin(), doorSet.end(), door);
 	if (it != doorSet.end()) {
 		door->decrementReferenceCounter();
-		doorSet.erase(it);
+		(*it) = doorSet.back();
+		doorSet.pop_back();
 	}
 }
 
 void House::addBed(BedItem* bed)
 {
 	bedsList.push_back(bed);
+	bedsList.shrink_to_fit();
 	bed->setHouse(this);
 }
 
@@ -407,9 +414,9 @@ HouseTransferItem* HouseTransferItem::createHouseTransferItem(House* house)
 	transferItem->incrementReferenceCounter();
 	transferItem->setID(ITEM_DOCUMENT_RO);
 	transferItem->setSubType(1);
-	std::ostringstream ss;
+	std::stringExtended ss(house->getName().length() + static_cast<size_t>(64));
 	ss << "It is a house transfer document for '" << house->getName() << "'.";
-	transferItem->setSpecialDescription(ss.str());
+	transferItem->setSpecialDescription(ss);
 	return transferItem;
 }
 
@@ -618,9 +625,9 @@ void Door::onRemoved()
 
 House* Houses::getHouseByPlayerId(uint32_t playerId)
 {
-	for (const auto& it : houseMap) {
-		if (it.second->getOwner() == playerId) {
-			return it.second;
+	for (auto& it : houseMap) {
+		if (it.second.getOwner() == playerId) {
+			return &it.second;
 		}
 	}
 	return nullptr;
@@ -678,8 +685,8 @@ void Houses::payHouses(RentPeriod_t rentPeriod) const
 	}
 
 	time_t currentTime = time(nullptr);
-	for (const auto& it : houseMap) {
-		House* house = it.second;
+	for (auto& it : houseMap) {
+		House* house = const_cast<House*>(&it.second);
 		if (house->getOwner() == 0) {
 			continue;
 		}
@@ -752,15 +759,16 @@ void Houses::payHouses(RentPeriod_t rentPeriod) const
 
 				Item* letter = Item::CreateItem(ITEM_LETTER_STAMPED);
 				if (letter) {
-					std::ostringstream ss;
+					std::stringExtended ss(period.length() + house->getName().length() + static_cast<size_t>(256));
 					ss << "Warning! \nThe " << period << " rent of " << house->getRent() << " gold for your house \"" << house->getName() << "\" is payable. Have it within " << daysLeft << " days or you will lose this house.";
-					letter->setText(ss.str());
+					letter->setText(ss);
 					#if GAME_FEATURE_MARKET > 0
 					if (g_game.internalAddItem(player.getInbox(), letter, INDEX_WHEREEVER, FLAG_NOLIMIT) != RETURNVALUE_NOERROR) {
 						delete letter;
 					}
 					#else
 					DepotLocker* depot = player.getDepotLocker(town->getID());
+					player.setLastDepotId(static_cast<int16_t>(town->getID()));
 					if (depot) {
 						if (g_game.internalAddItem(depot, letter, INDEX_WHEREEVER, FLAG_NOLIMIT) != RETURNVALUE_NOERROR) {
 							delete letter;

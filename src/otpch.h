@@ -34,13 +34,18 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
-#include <string>
+#include "stringExtend.h"
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <array>
 
 #include <boost/asio.hpp>
 
 #include <pugixml.hpp>
 #include "simd.h"
 #include "features.h"
+
+#if GAME_FEATURE_ROBINHOOD_HASH_MAP > 0
+#include "robin_hood.h"
+#endif

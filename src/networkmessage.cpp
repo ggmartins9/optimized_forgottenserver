@@ -51,7 +51,7 @@ Position NetworkMessage::getPosition()
 void NetworkMessage::addString(const std::string& value)
 {
 	size_t stringLen = value.length();
-	if (!canAdd(stringLen + 2) || stringLen > 8192) {
+	if (!canAdd(stringLen + 2)) {
 		return;
 	}
 
@@ -61,15 +61,9 @@ void NetworkMessage::addString(const std::string& value)
 	info.length += stringLen;
 }
 
-void NetworkMessage::addDouble(double value, uint8_t precision/* = 2*/)
-{
-	addByte(precision);
-	add<uint32_t>((value * std::pow(static_cast<float>(10), precision)) + std::numeric_limits<int32_t>::max());
-}
-
 void NetworkMessage::addBytes(const char* bytes, size_t size)
 {
-	if (!canAdd(size) || size > 8192) {
+	if (!canAdd(size)) {
 		return;
 	}
 
@@ -80,9 +74,11 @@ void NetworkMessage::addBytes(const char* bytes, size_t size)
 
 void NetworkMessage::addPaddingBytes(size_t n)
 {
+	#define canAdd(size) ((size + info.position) < NETWORKMESSAGE_MAXSIZE)
 	if (!canAdd(n)) {
 		return;
 	}
+	#undef canAdd
 
 	memset(buffer + info.position, 0x33, n);
 	info.length += n;

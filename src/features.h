@@ -62,6 +62,7 @@
 
 #if CLIENT_VERSION >= 854
 #define GAME_FEATURE_GUILD_EMBLEM 1
+#define GAME_FEATURE_SERVER_LOG_DETAILS 1
 #endif
 
 #if CLIENT_VERSION >= 860
@@ -278,5 +279,22 @@
 #if CLIENT_VERSION >= 1215
 #define GAME_FEATURE_TOURNAMENTS 1
 #endif
+
+#if CLIENT_VERSION >= 1220
+#define GAME_FEATURE_PARTY_LIST 1
+#define GAME_FEATURE_PLAYER_VOCATIONS 1
+#endif
+
+#if CLIENT_VERSION >= 1240
+#define GAME_FEATURE_HIGHSCORES 1
+#endif
+
+//robinhood hash map is faster variant of hash map than std::unordered_map but it depends on std::unordered_map implementation
+//compared with visual studio stl library it is at least 2x faster
+#define GAME_FEATURE_ROBINHOOD_HASH_MAP 0
+
+//Xiaolin Wu's line algorithm for isSightClear - it seems cipsoft use this algorithm or at least something very similar
+//if disabled it'll fallback to Bresenham's line algorithm
+#define GAME_FEATURE_XIAOLIN_WU_SIGHT_CLEAR 1
 
 #endif

@@ -43,8 +43,8 @@ enum ConditionAttr_t {
 	CONDITIONATTR_FORMULA_MINB,
 	CONDITIONATTR_FORMULA_MAXA,
 	CONDITIONATTR_FORMULA_MAXB,
-	CONDITIONATTR_LIGHTCOLOR,
-	CONDITIONATTR_LIGHTLEVEL,
+	CONDITIONATTR_LIGHTCOLOR, // unused - backward compatibility
+	CONDITIONATTR_LIGHTLEVEL, // unused - backward compatibility
 	CONDITIONATTR_LIGHTTICKS,
 	CONDITIONATTR_LIGHTINTERVAL,
 	CONDITIONATTR_SOULTICKS,
@@ -56,6 +56,8 @@ enum ConditionAttr_t {
 	CONDITIONATTR_ISBUFF,
 	CONDITIONATTR_SUBID,
 	CONDITIONATTR_DISABLEDEFENSE,
+	CONDITIONATTR_LIGHTCOLOR_8B,
+	CONDITIONATTR_LIGHTLEVEL_8B,
 
 	//reserved for serialization
 	CONDITIONATTR_END = 254,
@@ -90,6 +92,9 @@ class Condition
 
 		virtual Condition* clone() const = 0;
 
+		void setType(ConditionType_t newType) {
+			conditionType = newType;
+		}
 		ConditionType_t getType() const {
 			return conditionType;
 		}
@@ -187,6 +192,10 @@ class ConditionRegeneration final : public ConditionGeneric
 		ConditionRegeneration(ConditionId_t id, ConditionType_t type, int32_t ticks, bool buff = false, uint32_t subId = 0):
 			ConditionGeneric(id, type, ticks, buff, subId) {}
 
+		#if GAME_FEATURE_REGENERATION_TIME > 0
+		bool startCondition(Creature* creature) override;
+		void endCondition(Creature* creature) override;
+		#endif
 		void addCondition(Creature* creature, const Condition* condition) override;
 		bool executeCondition(Creature* creature, int32_t interval) override;
 

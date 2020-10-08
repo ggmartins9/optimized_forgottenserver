@@ -71,8 +71,6 @@ enum LightState_t {
 };
 
 static constexpr int32_t EVENT_LIGHTINTERVAL = 10000;
-static constexpr int32_t EVENT_DECAYINTERVAL = 250;
-static constexpr int32_t EVENT_DECAY_BUCKETS = 4;
 
 /**
   * Main Game class.
@@ -327,6 +325,10 @@ class Game
 		void playerCyclopediaRace(Player* player, uint16_t monsterId);
 		void playerCyclopediaCharacterInfo(Player* player, CyclopediaCharacterInfoType_t characterInfoType);
 
+		#if GAME_FEATURE_HIGHSCORES > 0
+		void playerHighscores(Player* player, HighscoreType_t type, uint8_t category, uint32_t vocation, const std::string& worldName, uint16_t page, uint8_t entriesPerPage);
+		#endif
+
 		void playerTournamentLeaderboard(Player* player, uint8_t leaderboardType);
 
 		bool internalStartTrade(Player* player, Player* tradePartner, Item* tradeItem);
@@ -354,6 +356,13 @@ class Game
 		void playerOpenChannel(Player* player, uint16_t channelId);
 		void playerCloseChannel(Player* player, uint16_t channelId);
 		void playerOpenPrivateChannel(Player* player, std::string& receiver);
+		#if GAME_FEATURE_STASH > 0
+		void playerStowItem(Player* player, Item* item, uint32_t count);
+		void playerStowItem(Player* player, const Position& pos, uint16_t spriteId, uint8_t stackpos, uint32_t count);
+		void playerStowContainer(Player* player, const Position& pos, uint16_t spriteId, uint8_t stackpos);
+		void playerStowStack(Player* player, const Position& pos, uint16_t spriteId, uint8_t stackpos);
+		void playerStashWithdraw(Player* player, uint16_t spriteId, uint32_t count, uint8_t stackpos);
+		#endif
 		#if GAME_FEATURE_QUEST_TRACKER > 0
 		void playerResetTrackedQuests(Player* player, std::vector<uint16_t>& quests);
 		#endif
@@ -429,7 +438,7 @@ class Game
 		void playerCreateMarketOffer(Player* player, uint8_t type, uint16_t spriteId, uint16_t amount, uint32_t price, bool anonymous);
 		void playerCancelMarketOffer(Player* player, uint32_t timestamp, uint16_t counter);
 		void playerAcceptMarketOffer(Player* player, uint32_t timestamp, uint16_t counter, uint16_t amount);
-		std::forward_list<Item*> getMarketItemList(uint16_t wareId, uint16_t sufficientCount, DepotChest* depotChest, Inbox* inbox);
+		std::vector<Item*> getMarketItemList(uint16_t wareId, uint16_t sufficientCount, DepotChest* depotChest, Inbox* inbox);
 		#endif
 
 		void playerExtendedOpcode(Player* player, uint8_t opcode, const std::string& buffer);
@@ -450,7 +459,6 @@ class Game
 		void internalCreatureChangeVisible(Creature* creature, bool visible);
 		void changeLight(const Creature* creature);
 		void updateCreatureSkull(const Creature* creature);
-		void updatePlayerShield(Player* player);
 		#if CLIENT_VERSION >= 1000 && CLIENT_VERSION < 1185
 		void updatePlayerHelpers(const Player& player);
 		#endif
@@ -482,6 +490,12 @@ class Game
 		//animation help functions
 		void addCreatureHealth(const Creature* target);
 		static void addCreatureHealth(const SpectatorVector& spectators, const Creature* target);
+		#if GAME_FEATURE_PARTY_LIST > 0
+		void addPlayerMana(const Player* target);
+		#endif
+		#if GAME_FEATURE_PLAYER_VOCATIONS > 0
+		void addPlayerVocation(const Player* target);
+		#endif
 		void addMagicEffect(const Position& pos, uint8_t effect);
 		static void addMagicEffect(const SpectatorVector& spectators, const Position& pos, uint8_t effect);
 		void addDistanceEffect(const Position& fromPos, const Position& toPos, uint8_t effect);
@@ -490,6 +504,9 @@ class Game
 		void updateCreatureData(const Creature* creature);
 
 		void startDecay(Item* item);
+		void stopDecay(Item* item);
+		void internalDecayItem(Item* item);
+
 		int32_t getLightHour() const {
 			return lightHour;
 		}
@@ -506,7 +523,7 @@ class Game
 		void sendOfflineTrainingDialog(Player* player);
 
 		const std::unordered_map<uint32_t, Player*>& getPlayers() const { return players; }
-		const std::map<uint32_t, Npc*>& getNpcs() const { return npcs; }
+		const std::unordered_map<uint32_t, Npc*>& getNpcs() const { return npcs; }
 
 		void addPlayer(Player* player);
 		void removePlayer(Player* player);
@@ -536,6 +553,7 @@ class Game
 		bool addUniqueItem(uint16_t uniqueId, Item* item);
 		void removeUniqueItem(uint16_t uniqueId);
 
+		bool reloadCreatureScripts(bool fromLua = false, bool reload = true);
 		bool reload(ReloadTypes_t reloadType);
 
 		Groups groups;
@@ -551,28 +569,21 @@ class Game
 		bool playerSpeakTo(Player* player, SpeakClasses type, const std::string& receiver, const std::string& text);
 		void playerSpeakToNpc(Player* player, const std::string& text);
 
-		void checkDecay();
-		void internalDecayItem(Item* item);
-
 		std::unordered_map<uint32_t, Player*> players;
 		std::unordered_map<std::string, Player*> mappedPlayerNames;
+		std::unordered_map<uint32_t, Npc*> npcs;
+		std::unordered_map<uint32_t, Monster*> monsters;
 		std::unordered_map<uint32_t, Guild*> guilds;
 		std::unordered_map<uint16_t, Item*> uniqueItems;
 		std::map<uint32_t, uint32_t> stages;
 
-		std::vector<Item*> decayItems[EVENT_DECAY_BUCKETS];
 		std::vector<Creature*> checkCreatureLists[EVENT_CREATURECOUNT];
-
-		std::vector<Item*> toDecayItems;
 		std::vector<Creature*> ToReleaseCreatures;
 		std::vector<Item*> ToReleaseItems;
 
 		size_t lastBucket = 0;
 
 		WildcardTreeNode wildcardTree { false };
-
-		std::map<uint32_t, Npc*> npcs;
-		std::map<uint32_t, Monster*> monsters;
 
 		//list of items that are in trading state, mapped to the player
 		std::map<Item*, uint32_t> tradeItems;

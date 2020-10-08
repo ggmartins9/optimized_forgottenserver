@@ -25,7 +25,7 @@
 #include "connection.h"
 #include "outputmessage.h"
 #include "protocol.h"
-#include "scheduler.h"
+#include "tasks.h"
 #include "server.h"
 
 extern ConfigManager g_config;
@@ -75,7 +75,7 @@ void Connection::close(bool force)
 	connectionState = CONNECTION_STATE_CLOSED;
 
 	if (protocol) {
-		g_dispatcher.addTask(createTask(std::bind(&Protocol::release, protocol)));
+		g_dispatcher.addTask(std::bind(&Protocol::release, protocol));
 	}
 
 	if (messageQueue.empty() || force) {
@@ -109,7 +109,7 @@ void Connection::accept(Protocol_ptr protocol)
 {
 	this->connectionState = CONNECTION_STATE_IDENTIFYING;
 	this->protocol = protocol;
-	g_dispatcher.addTask(createTask(std::bind(&Protocol::onConnect, protocol)));
+	g_dispatcher.addTask(std::bind(&Protocol::onConnect, protocol));
 
 	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
 	try {
@@ -187,7 +187,7 @@ void Connection::parseProxyIdentification(const boost::system::error_code& error
 			}
 		}
 	} else if (connectionState == CONNECTION_STATE_READINGS) {
-		size_t remainder = serverName.length()-2;
+		size_t remainder = serverName.length() - 2;
 		if (strncasecmp(reinterpret_cast<char*>(msgBuffer), &serverName[2], remainder) == 0) {
 			connectionState = CONNECTION_STATE_OPEN;
 		} else {
@@ -235,7 +235,7 @@ void Connection::parseHeader(const boost::system::error_code& error)
 	}
 
 	uint16_t size = msg.getLengthHeader();
-	if (size == 0 || size >= NETWORKMESSAGE_MAXSIZE - 16) {
+	if (size == 0 || size > INPUTMESSAGE_MAXSIZE) {
 		close(FORCE_CLOSE);
 		return;
 	}
@@ -345,7 +345,11 @@ void Connection::send(const OutputMessage_ptr& msg)
 	if (noPendingWrite) {
 		// Make asio thread handle xtea encryption instead of dispatcher
 		try {
+			#if BOOST_VERSION >= 106600
+			boost::asio::post(socket.get_executor(), std::bind(&Connection::internalWorker, shared_from_this()));
+			#else
 			socket.get_io_service().post(std::bind(&Connection::internalWorker, shared_from_this()));
+			#endif
 		} catch (boost::system::system_error& e) {
 			std::cout << "[Network error - Connection::send] " << e.what() << std::endl;
 			messageQueue.clear();
@@ -356,9 +360,13 @@ void Connection::send(const OutputMessage_ptr& msg)
 
 void Connection::internalWorker()
 {
-	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
+	std::unique_lock<std::recursive_mutex> lockClass(connectionLock);
 	if (!messageQueue.empty()) {
-		internalSend(messageQueue.front());
+		const OutputMessage_ptr& msg = messageQueue.front();
+		lockClass.unlock();
+		protocol->onSendMessage(msg);
+		lockClass.lock();
+		internalSend(msg);
 	} else if (connectionState == CONNECTION_STATE_CLOSED) {
 		closeSocket();
 	}
@@ -366,7 +374,6 @@ void Connection::internalWorker()
 
 void Connection::internalSend(const OutputMessage_ptr& msg)
 {
-	protocol->onSendMessage(msg);
 	try {
 		writeTimer.expires_from_now(boost::posix_time::seconds(CONNECTION_WRITE_TIMEOUT));
 		writeTimer.async_wait(std::bind(&Connection::handleTimeout, std::weak_ptr<Connection>(shared_from_this()), std::placeholders::_1));
@@ -396,7 +403,7 @@ uint32_t Connection::getIP()
 
 void Connection::onWriteOperation(const boost::system::error_code& error)
 {
-	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
+	std::unique_lock<std::recursive_mutex> lockClass(connectionLock);
 	writeTimer.cancel();
 	messageQueue.pop_front();
 
@@ -407,7 +414,11 @@ void Connection::onWriteOperation(const boost::system::error_code& error)
 	}
 
 	if (!messageQueue.empty()) {
-		internalSend(messageQueue.front());
+		const OutputMessage_ptr& msg = messageQueue.front();
+		lockClass.unlock();
+		protocol->onSendMessage(msg);
+		lockClass.lock();
+		internalSend(msg);
 	} else if (connectionState == CONNECTION_STATE_CLOSED) {
 		closeSocket();
 	}

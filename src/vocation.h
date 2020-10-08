@@ -34,7 +34,7 @@ class Vocation
 		const std::string& getVocDescription() const {
 			return description;
 		}
-		uint64_t getReqSkillTries(uint8_t skill, uint16_t level);
+		uint64_t getReqSkillTries(uint8_t skill, uint32_t level);
 		uint64_t getReqMana(uint32_t magLevel);
 
 		uint16_t getId() const {
@@ -94,8 +94,8 @@ class Vocation
 	private:
 		friend class Vocations;
 
-		std::map<uint32_t, uint64_t> cacheMana;
-		std::map<uint32_t, uint32_t> cacheSkill[SKILL_LAST + 1];
+		std::vector<uint64_t> cacheMana;
+		std::vector<uint64_t> cacheSkill[SKILL_LAST + 1];
 
 		std::string name = "none";
 		std::string description;
@@ -129,6 +129,7 @@ class Vocations
 		bool loadFromXml();
 
 		Vocation* getVocation(uint16_t id);
+		const std::map<uint16_t, Vocation>& getVocations() const {return vocationsMap;}
 		int32_t getVocationId(const std::string& name) const;
 		uint16_t getPromotedVocation(uint16_t vocationId) const;
 

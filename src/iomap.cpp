@@ -20,9 +20,18 @@
 #include "otpch.h"
 
 #include "iomap.h"
-
-#include <boost/filesystem.hpp>
 #include "bed.h"
+
+#ifdef __cpp_lib_filesystem
+#include <filesystem>
+namespace fs = std::filesystem;
+#elif __cpp_lib_experimental_filesystem
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#else
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+#endif
 
 /*
 	OTBM_ROOTV1
@@ -69,7 +78,7 @@ Tile* IOMap::createTile(Item*& ground, Item* item, uint16_t x, uint16_t y, uint8
 
 bool IOMap::loadMap(Map* map, const std::string& fileName)
 {
-	if (!boost::filesystem::exists(fileName)) {
+	if (!fs::exists(fileName)) {
 		setLastErrorString("Failed to load " + fileName + ": File doesn't exist.");
 		return false;
 	}
@@ -238,17 +247,17 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 		if (tileNode.type == OTBM_HOUSETILE) {
 			uint32_t houseId;
 			if (!propStream.read<uint32_t>(houseId)) {
-				std::ostringstream ss;
+				std::stringExtended ss(128);
 				ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Could not read house id.";
-				setLastErrorString(ss.str());
+				setLastErrorString(std::move(static_cast<std::string&>(ss)));
 				return false;
 			}
 
 			house = map.houses.addHouse(houseId);
 			if (!house) {
-				std::ostringstream ss;
+				std::stringExtended ss(128);
 				ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Could not create house id: " << houseId;
-				setLastErrorString(ss.str());
+				setLastErrorString(std::move(static_cast<std::string&>(ss)));
 				return false;
 			}
 
@@ -264,9 +273,9 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 				case OTBM_ATTR_TILE_FLAGS: {
 					uint32_t flags;
 					if (!propStream.read<uint32_t>(flags)) {
-						std::ostringstream ss;
+						std::stringExtended ss(128);
 						ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Failed to read tile flags.";
-						setLastErrorString(ss.str());
+						setLastErrorString(std::move(static_cast<std::string&>(ss)));
 						return false;
 					}
 
@@ -287,9 +296,9 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 				case OTBM_ATTR_ITEM: {
 					Item* item = (_legacy ? Item::CreateItem_legacy(propStream) : Item::CreateItem(propStream));
 					if (!item) {
-						std::ostringstream ss;
+						std::stringExtended ss(128);
 						ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Failed to create item.";
-						setLastErrorString(ss.str());
+						setLastErrorString(std::move(static_cast<std::string&>(ss)));
 						return false;
 					}
 
@@ -319,18 +328,18 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 				}
 
 				default:
-					std::ostringstream ss;
+					std::stringExtended ss(128);
 					ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Unknown tile attribute.";
-					setLastErrorString(ss.str());
+					setLastErrorString(std::move(static_cast<std::string&>(ss)));
 					return false;
 			}
 		}
 
 		for (auto& itemNode : tileNode.children) {
 			if (itemNode.type != OTBM_ITEM) {
-				std::ostringstream ss;
+				std::stringExtended ss(128);
 				ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Unknown node type.";
-				setLastErrorString(ss.str());
+				setLastErrorString(std::move(static_cast<std::string&>(ss)));
 				return false;
 			}
 
@@ -342,16 +351,16 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 
 			Item* item = (_legacy ? Item::CreateItem_legacy(stream) : Item::CreateItem(stream));
 			if (!item) {
-				std::ostringstream ss;
+				std::stringExtended ss(128);
 				ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Failed to create item.";
-				setLastErrorString(ss.str());
+				setLastErrorString(std::move(static_cast<std::string&>(ss)));
 				return false;
 			}
 
 			if (!item->unserializeItemNode(loader, itemNode, stream, _legacy)) {
-				std::ostringstream ss;
+				std::stringExtended ss(128);
 				ss << "[x:" << x << ", y:" << y << ", z:" << z << "] Failed to load item " << item->getID() << '.';
-				setLastErrorString(ss.str());
+				setLastErrorString(std::move(static_cast<std::string&>(ss)));
 				delete item;
 				return false;
 			}
@@ -413,8 +422,7 @@ bool IOMap::parseTowns(OTB::Loader& loader, const OTB::Node& townsNode, Map& map
 
 		Town* town = map.towns.getTown(townId);
 		if (!town) {
-			town = new Town(townId);
-			map.towns.addTown(townId, town);
+			town = map.towns.addTown(townId);
 		}
 
 		std::string townName;

@@ -43,7 +43,6 @@ class Weapon;
 class ProtocolGame;
 class Npc;
 class Party;
-class SchedulerTask;
 class Bed;
 class Guild;
 
@@ -122,6 +121,10 @@ enum PlayerUpdateFlags : uint32_t {
 	PlayerUpdate_Skills = 1 << 3,
 	PlayerUpdate_Inventory = 1 << 4,
 	PlayerUpdate_Sale = 1 << 5
+};
+
+enum PlayerAsyncOngoingTaskFlags : uint64_t {
+	PlayerAsyncTask_Highscore = 1 << 0
 };
 
 using MuteCountMap = std::map<uint32_t, uint32_t>;
@@ -405,6 +408,25 @@ class Player final : public Creature, public Cylinder
 			return inMarket;
 		}
 		#endif
+		#if GAME_FEATURE_STASH > 0
+		void setSupplyStashAvailable(bool value) {
+			supplyStashAvailable = value;
+		}
+		bool isSupplyStashAvailable() const {
+			return supplyStashAvailable;
+		}
+		void setMarketAvailable(bool value) {
+			marketAvailable = value;
+		}
+		bool isMarketAvailable() const {
+			return marketAvailable;
+		}
+
+		size_t getStashItemCount() const {return stashItems.size();}
+		uint32_t getStashItemCount(uint16_t itemId) const;
+		bool addStashItem(uint16_t itemId, uint32_t itemCount);
+		bool removeStashItem(uint16_t itemId, uint32_t itemCount);
+		#endif
 
 		void setLastDepotId(int16_t newId) {
 			lastDepotId = newId;
@@ -456,7 +478,7 @@ class Player final : public Creature, public Cylinder
 
 		uint16_t getHelpers() const;
 
-		bool setVocation(uint16_t vocId);
+		bool setVocation(uint16_t vocId, bool internal = false);
 		uint16_t getVocationId() const {
 			return vocation->getId();
 		}
@@ -620,7 +642,7 @@ class Player final : public Creature, public Cylinder
 		void onWalkComplete() override;
 
 		void stopWalk();
-		void openShopWindow(Npc* npc, const std::vector<ShopInfo>& shop);
+		void openShopWindow(Npc* npc, std::vector<ShopInfo>& shop);
 		bool closeShopWindow(bool sendCloseShopWindow = true);
 		bool updateSaleShopList(const Item* item);
 		bool hasShopItemForSale(uint32_t itemId, uint8_t subType) const;
@@ -986,11 +1008,57 @@ class Player final : public Creature, public Cylinder
 				client->sendChangeSpeed(creature, newSpeed);
 			}
 		}
-		void sendCreatureHealth(const Creature* creature) const {
+		void sendCreatureHealth(const Creature* creature, uint8_t healthPercent) const {
 			if (client) {
-				client->sendCreatureHealth(creature);
+				client->sendCreatureHealth(creature, healthPercent);
 			}
 		}
+		#if GAME_FEATURE_PARTY_LIST > 0
+		void sendPartyCreatureUpdate(const Creature* creature) const {
+			if (client) {
+				client->sendPartyCreatureUpdate(creature);
+			}
+		}
+		void sendPartyCreatureShield(const Creature* creature) const {
+			if (client) {
+				client->sendPartyCreatureShield(creature);
+			}
+		}
+		void sendPartyCreatureSkull(const Creature* creature) const {
+			if (client) {
+				client->sendPartyCreatureSkull(creature);
+			}
+		}
+		void sendPartyCreatureHealth(const Creature* creature, uint8_t healthPercent) const {
+			if (client) {
+				client->sendPartyCreatureHealth(creature, healthPercent);
+			}
+		}
+		void sendPartyPlayerMana(const Player* player, uint8_t manaPercent) const {
+			if (client) {
+				client->sendPartyPlayerMana(player, manaPercent);
+			}
+		}
+		void sendPartyCreatureShowStatus(const Creature* creature, bool showStatus) const {
+			if (client) {
+				client->sendPartyCreatureShowStatus(creature, showStatus);
+			}
+		}
+		#endif
+		#if GAME_FEATURE_PLAYER_VOCATIONS > 0
+		#if GAME_FEATURE_PARTY_LIST > 0
+		void sendPartyPlayerVocation(const Player* player) const {
+			if (client) {
+				client->sendPartyPlayerVocation(player);
+			}
+		}
+		#endif
+		void sendPlayerVocation(const Player* player) const {
+			if (client) {
+				client->sendPlayerVocation(player);
+			}
+		}
+		#endif
 		void sendDistanceShoot(const Position& from, const Position& to, unsigned char type) const {
 			if (client) {
 				client->sendDistanceShoot(from, to, type);
@@ -1142,6 +1210,18 @@ class Player final : public Creature, public Cylinder
 			}
 		}
 		#endif
+		#if GAME_FEATURE_STASH > 0
+		void sendSupplyStash() {
+			if (client) {
+				client->sendSupplyStash(stashItems);
+			}
+		}
+		void sendSpecialContainersAvailable(bool supplyStashAvailable, bool marketAvailable) {
+			if (client) {
+				client->sendSpecialContainersAvailable(supplyStashAvailable, marketAvailable);
+			}
+		}
+		#endif
 		#if GAME_FEATURE_INSPECTION > 0
 		void sendItemInspection(uint16_t itemId, uint8_t itemCount, const Item* item, bool cyclopedia) {
 			if (client) {
@@ -1265,6 +1345,18 @@ class Player final : public Creature, public Cylinder
 				client->sendCyclopediaCharacterTitles();
 			}
 		}
+		#if GAME_FEATURE_HIGHSCORES > 0
+		void sendHighscoresNoData() {
+			if (client) {
+				client->sendHighscoresNoData();
+			}
+		}
+		void sendHighscores(std::vector<HighscoreCharacter>& characters, uint8_t categoryId, uint32_t vocationId, uint16_t page, uint16_t pages) {
+			if (client) {
+				client->sendHighscores(characters, categoryId, vocationId, page, pages);
+			}
+		}
+		#endif
 		void sendTournamentLeaderboard() {
 			if (client) {
 				client->sendTournamentLeaderboard();
@@ -1343,8 +1435,18 @@ class Player final : public Creature, public Cylinder
 			scheduledUpdate = false;
 		}
 
+		void addAsyncOngoingTask(uint64_t flags) {
+			asyncOngoingTasks |= flags;
+		}
+		bool hasAsyncOngoingTask(uint64_t flags) const {
+			return (asyncOngoingTasks & flags);
+		}
+		void resetAsyncOngoingTask(uint64_t flags) {
+			asyncOngoingTasks &= ~(flags);
+		}
+
 	private:
-		std::forward_list<Condition*> getMuteConditions() const;
+		std::vector<Condition*> getMuteConditions() const;
 
 		void checkTradeState(const Item* item);
 		bool hasCapacity(const Item* item, uint32_t count) const;
@@ -1355,9 +1457,12 @@ class Player final : public Creature, public Cylinder
 
 		void updateInventoryWeight();
 
-		void setNextWalkActionTask(SchedulerTask* task);
-		void setNextWalkTask(SchedulerTask* task);
-		void setNextActionTask(SchedulerTask* task);
+		void stopNextWalkActionTask();
+		void stopNextWalkTask();
+		void stopNextActionTask();
+		void setNextWalkActionTask(uint32_t delay, std::function<void (void)> f);
+		void setNextWalkTask(uint32_t delay, std::function<void (void)> f);
+		void setNextActionTask(uint32_t delay, std::function<void (void)> f);
 
 		void death(Creature* lastHitCreature) override;
 		bool dropCorpse(Creature* lastHitCreature, Creature* mostDamageCreature, bool lastHitUnjustified, bool mostDamageUnjustified) override;
@@ -1394,6 +1499,9 @@ class Player final : public Creature, public Cylinder
 		std::unordered_set<uint32_t> attackedSet;
 		std::unordered_set<uint32_t> VIPList;
 
+		#if GAME_FEATURE_STASH > 0
+		std::map<uint16_t, uint32_t> stashItems;
+		#endif
 		std::map<uint8_t, OpenContainer> openContainers;
 		std::map<uint32_t, DepotLocker*> depotLockerMap;
 		std::map<uint32_t, DepotChest*> depotChests;
@@ -1405,9 +1513,9 @@ class Player final : public Creature, public Cylinder
 
 		std::vector<ShopInfo> shopItemList;
 
-		std::forward_list<Party*> invitePartyList;
-		std::forward_list<std::string> learnedInstantSpellList;
-		std::forward_list<Condition*> storedConditionList; // TODO: This variable is only temporarily used when logging in, get rid of it somehow
+		std::unordered_set<std::string> learnedInstantSpellList;
+		std::vector<Party*> invitePartyList;
+		std::vector<Condition*> storedConditionList;
 
 		#if GAME_FEATURE_QUEST_TRACKER > 0
 		std::vector<uint16_t> trackedQuests;
@@ -1429,6 +1537,10 @@ class Player final : public Creature, public Cylinder
 		uint64_t lastAttack = 0;
 		uint64_t bankBalance = 0;
 		uint64_t lastQuestlogUpdate = 0;
+		uint64_t actionTaskEvent = 0;
+		uint64_t nextStepEvent = 0;
+		uint64_t walkTaskEvent = 0;
+		uint64_t asyncOngoingTasks = 0;
 		int64_t lastFailedFollow = 0;
 		int64_t skullTicks = 0;
 		int64_t lastWalkthroughAttempt = 0;
@@ -1454,7 +1566,7 @@ class Player final : public Creature, public Cylinder
 		Party* party = nullptr;
 		Player* tradePartner = nullptr;
 		ProtocolGame_ptr client;
-		SchedulerTask* walkTask = nullptr;
+		std::pair<uint32_t, std::function<void (void)>>* walkTask = nullptr;
 		Town* town = nullptr;
 		Vocation* vocation = nullptr;
 
@@ -1466,9 +1578,6 @@ class Player final : public Creature, public Cylinder
 		uint32_t conditionSuppressions = 0;
 		uint32_t level = 1;
 		uint32_t magLevel = 0;
-		uint32_t actionTaskEvent = 0;
-		uint32_t nextStepEvent = 0;
-		uint32_t walkTaskEvent = 0;
 		uint32_t MessageBufferTicks = 0;
 		uint32_t lastIP = 0;
 		uint32_t accountNumber = 0;
@@ -1522,6 +1631,10 @@ class Player final : public Creature, public Cylinder
 		bool addAttackSkillPoint = false;
 		bool inventoryAbilities[CONST_SLOT_LAST + 1] = {};
 		bool scheduledUpdate = false;
+		#if GAME_FEATURE_STASH > 0
+		bool supplyStashAvailable = false;
+		bool marketAvailable = false;
+		#endif
 
 		static uint32_t playerAutoID;
 

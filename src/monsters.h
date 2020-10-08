@@ -22,7 +22,6 @@
 
 #include "creature.h"
 
-
 const uint32_t MAX_LOOTCHANCE = 100000;
 const uint32_t MAX_STATICWALK = 100;
 
@@ -154,6 +153,11 @@ class MonsterType
 		bool isConvinceable = false;
 		bool isAttackable = true;
 		bool isHostile = true;
+		#if CLIENT_VERSION >= 1070
+		bool isBlockable = false;
+		#else
+		bool isBlockable = true;
+		#endif
 		bool hiddenHealth = false;
 		bool canWalkOnEnergy = true;
 		bool canWalkOnFire = true;
@@ -204,7 +208,8 @@ class MonsterSpell
 		int32_t conditionMaxDamage = 0;
 		int32_t conditionStartDamage = 0;
 		int32_t tickInterval = 0;
-		int32_t speedChange = 0;
+		int32_t minSpeedChange = 0;
+		int32_t maxSpeedChange = 0;
 		int32_t duration = 0;
 
 		bool isScripted = false;
@@ -240,7 +245,7 @@ class Monsters
 		std::string getRaceName(uint16_t raceId);
 
 		MonsterType* getMonsterType(const std::string& name);
-		void addMonsterType(const std::string& name, MonsterType* mType);
+		MonsterType* addMonsterType(const std::string& name);
 		bool deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std::string& description = "");
 
 		std::unique_ptr<LuaScriptInterface> scriptInterface;
@@ -260,7 +265,6 @@ class Monsters
 		std::map<uint16_t, std::map<uint16_t, std::string>> monsterRaces;
 
 		std::map<std::string, MonsterType> monsters;
-		std::map<std::string, std::string> unloadedMonsters;
 
 		bool loaded = false;
 };

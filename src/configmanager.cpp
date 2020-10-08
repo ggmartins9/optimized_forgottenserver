@@ -19,7 +19,19 @@
 
 #include "otpch.h"
 
+#ifdef __has_include
+
+#if __has_include(<luajit/lua.hpp>)
+#include <luajit/lua.hpp>
+#elif __has_include(<lua.hpp>)
 #include <lua.hpp>
+#else
+#error "Cannot detect lua library"
+#endif
+
+#else
+#include <lua.hpp>
+#endif
 
 #include "configmanager.h"
 #include "game.h"
@@ -175,12 +187,19 @@ bool ConfigManager::load()
 	integer[CHECK_EXPIRED_MARKET_OFFERS_EACH_MINUTES] = getGlobalNumber(L, "checkExpiredMarketOffersEachMinutes", 60);
 	integer[MAX_MARKET_OFFERS_AT_A_TIME_PER_PLAYER] = getGlobalNumber(L, "maxMarketOffersAtATimePerPlayer", 100);
 	integer[MAX_PACKETS_PER_SECOND] = getGlobalNumber(L, "maxPacketsPerSecond", 25);
+	integer[COMPRESSION_LEVEL] = getGlobalNumber(L, "packetCompressionLevel", 6);
 	#if GAME_FEATURE_STORE > 0
 	integer[STORE_COIN_PACKAGES] = getGlobalNumber(L, "storeCoinPackages", 25);
 	#endif
 	#if GAME_FEATURE_QUEST_TRACKER > 0
 	integer[MAX_TRACKED_QUESTS] = getGlobalNumber(L, "maxTrackedQuests", 10);
 	integer[MAX_TRACKED_QUESTS_PREMIUM] = getGlobalNumber(L, "maxTrackedQuestsPremium", 25);
+	#endif
+	#if GAME_FEATURE_PARTY_LIST > 0
+	integer[PARTY_LIST_MAX_DISTANCE] = getGlobalNumber(L, "partyListMaxDistance", 0);
+	#endif
+	#if GAME_FEATURE_STASH > 0
+	integer[MAX_SUPPLY_STASH_STOWED_ITEMS] = std::min<int32_t>(getGlobalNumber(L, "maxSupplyStashStowedItems", 2000), 10000);
 	#endif
 
 	loaded = true;

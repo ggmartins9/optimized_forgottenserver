@@ -31,7 +31,7 @@ NpcScriptInterface* Npc::scriptInterface = nullptr;
 
 void Npcs::reload()
 {
-	const std::map<uint32_t, Npc*>& npcs = g_game.getNpcs();
+	const auto& npcs = g_game.getNpcs();
 	for (const auto& it : npcs) {
 		it.second->closeAllShopWindows();
 	}
@@ -240,11 +240,8 @@ bool Npc::canSee(const Position& pos) const
 
 std::string Npc::getDescription(int32_t) const
 {
-	std::string descr;
-	descr.reserve(name.length() + 1);
-	descr.assign(name);
-	descr.push_back('.');
-	return descr;
+	std::stringExtended str(name.length() + static_cast<size_t>(2));
+	return (str << name << '.');
 }
 
 void Npc::onCreatureAppear(Creature* creature, bool isLogin)
@@ -489,7 +486,7 @@ bool Npc::getRandomStep(Direction& dir) const
 void Npc::doMoveTo(const Position& pos)
 {
 	std::vector<Direction> listDir;
-	if (getPathTo(pos, listDir, 1, 1, true, true)) {
+	if (getPathTo(pos, listDir, 1, 1, true, false)) {
 		startAutoWalk(listDir);
 	}
 }
@@ -798,6 +795,12 @@ int NpcScriptInterface::luaOpenShopWindow(lua_State* L)
 	}
 
 	std::vector<ShopInfo> items;
+	#if LUA_VERSION_NUM >= 502
+	items.reserve(lua_rawlen(L, -1));
+	#else
+	items.reserve(lua_objlen(L, -1));
+	#endif
+
 	lua_pushnil(L);
 	while (lua_next(L, -2) != 0) {
 		const auto tableIndex = lua_gettop(L);
@@ -812,6 +815,12 @@ int NpcScriptInterface::luaOpenShopWindow(lua_State* L)
 		uint32_t buyPrice = getField<uint32_t>(L, tableIndex, "buy");
 		uint32_t sellPrice = getField<uint32_t>(L, tableIndex, "sell");
 		std::string realName = getFieldString(L, tableIndex, "name");
+		if (buyPrice == static_cast<uint32_t>(-1)) {
+			buyPrice = 0;
+		}
+		if (sellPrice == static_cast<uint32_t>(-1)) {
+			sellPrice = 0;
+		}
 
 		items.emplace_back(itemId, subType, buyPrice, sellPrice, std::move(realName));
 		lua_pop(L, 6);
@@ -1016,6 +1025,12 @@ int NpcScriptInterface::luaNpcOpenShopWindow(lua_State* L)
 	}
 
 	std::vector<ShopInfo> items;
+	#if LUA_VERSION_NUM >= 502
+	items.reserve(lua_rawlen(L, 3));
+	#else
+	items.reserve(lua_objlen(L, 3));
+	#endif
+
 	lua_pushnil(L);
 	while (lua_next(L, 3) != 0) {
 		const auto tableIndex = lua_gettop(L);
@@ -1030,6 +1045,12 @@ int NpcScriptInterface::luaNpcOpenShopWindow(lua_State* L)
 		uint32_t buyPrice = getField<uint32_t>(L, tableIndex, "buy");
 		uint32_t sellPrice = getField<uint32_t>(L, tableIndex, "sell");
 		std::string realName = getFieldString(L, tableIndex, "name");
+		if (buyPrice == static_cast<uint32_t>(-1)) {
+			buyPrice = 0;
+		}
+		if (sellPrice == static_cast<uint32_t>(-1)) {
+			sellPrice = 0;
+		}
 
 		items.emplace_back(itemId, subType, buyPrice, sellPrice, std::move(realName));
 		lua_pop(L, 6);

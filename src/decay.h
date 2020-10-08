@@ -17,29 +17,24 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef FS_RSA_H_C4E277DA8E884B578DDBF0566F504E91
-#define FS_RSA_H_C4E277DA8E884B578DDBF0566F504E91
+#ifndef FS_DECAY_H_F5229673AD6B4A2BAA2D38E5618F77B3A44B4248517D472553552E68
+#define FS_DECAY_H_F5229673AD6B4A2BAA2D38E5618F77B3A44B4248517D472553552E68
 
-#include <gmp.h>
+#include "item.h"
 
-class RSA
+class Decay
 {
 	public:
-		RSA();
-		~RSA();
-
-		// non-copyable
-		RSA(const RSA&) = delete;
-		RSA& operator=(const RSA&) = delete;
-
-		void setKey(const char* pString, const char* qString, int base = 10);
-		void decrypt(char* msg) const;
-
-		std::string base64Decrypt(const std::string& input);
-		bool loadPEM(const std::string& filename);
+		void startDecay(Item* item, int32_t duration);
+		void stopDecay(Item* item, int64_t timestamp);
 
 	private:
-		mpz_t n, d;
+		void checkDecay();
+
+		uint64_t eventId {0};
+		std::map<int64_t, std::vector<Item*>> decayMap;
 };
+
+extern Decay g_decay;
 
 #endif

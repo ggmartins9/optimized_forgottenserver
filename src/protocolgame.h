@@ -79,9 +79,9 @@ class ProtocolGame final : public Protocol
 		explicit ProtocolGame(Connection_ptr connection) : Protocol(connection) {}
 
 		#if GAME_FEATURE_SESSIONKEY > 0
-		void login(const std::string accountName, const std::string password, std::string characterName, std::string token, uint32_t tokenTime, OperatingSystem_t operatingSystem, OperatingSystem_t tfcOperatingSystem);
+		void login(const std::string& accountName, const std::string& password, std::string& characterName, std::string& token, uint32_t tokenTime, OperatingSystem_t operatingSystem, OperatingSystem_t tfcOperatingSystem);
 		#else
-		void login(const std::string accountName, const std::string password, std::string characterName, OperatingSystem_t operatingSystem, OperatingSystem_t tfcOperatingSystem);
+		void login(const std::string& accountName, const std::string& password, std::string& characterName, OperatingSystem_t operatingSystem, OperatingSystem_t tfcOperatingSystem);
 		#endif
 		void logout(bool displayEffect, bool forced);
 
@@ -136,6 +136,10 @@ class ProtocolGame final : public Protocol
 		void parseCyclopediaRace(NetworkMessage& msg);
 		void parseCyclopediaHouseAction(NetworkMessage& msg);
 		void parseCyclopediaCharacterInfo(NetworkMessage& msg);
+
+		#if GAME_FEATURE_HIGHSCORES > 0
+		void parseHighscores(NetworkMessage& msg);
+		#endif
 
 		void parseTournamentLeaderboard(NetworkMessage& msg);
 
@@ -209,6 +213,11 @@ class ProtocolGame final : public Protocol
 		void parseOpenPrivateChannel(NetworkMessage& msg);
 		void parseCloseChannel(NetworkMessage& msg);
 
+		#if GAME_FEATURE_STASH > 0
+		//Stash Actions
+		void parseStashAction(NetworkMessage& msg);
+		#endif
+
 		//Send functions
 		#if GAME_FEATURE_INSPECTION > 0
 		void sendItemInspection(uint16_t itemId, uint8_t itemCount, const Item* item, bool cyclopedia);
@@ -229,7 +238,21 @@ class ProtocolGame final : public Protocol
 
 		void sendDistanceShoot(const Position& from, const Position& to, uint8_t type);
 		void sendMagicEffect(const Position& pos, uint8_t type);
-		void sendCreatureHealth(const Creature* creature);
+		void sendCreatureHealth(const Creature* creature, uint8_t healthPercent);
+		#if GAME_FEATURE_PARTY_LIST > 0
+		void sendPartyCreatureUpdate(const Creature* target);
+		void sendPartyCreatureShield(const Creature* target);
+		void sendPartyCreatureSkull(const Creature* target);
+		void sendPartyCreatureHealth(const Creature* target, uint8_t healthPercent);
+		void sendPartyPlayerMana(const Player* target, uint8_t manaPercent);
+		void sendPartyCreatureShowStatus(const Creature* target, bool showStatus);
+		#endif
+		#if GAME_FEATURE_PLAYER_VOCATIONS > 0
+		#if GAME_FEATURE_PARTY_LIST > 0
+		void sendPartyPlayerVocation(const Player* target);
+		#endif
+		void sendPlayerVocation(const Player* target);
+		#endif
 		void sendSkills();
 		void sendPing();
 		void sendPingBack();
@@ -275,6 +298,11 @@ class ProtocolGame final : public Protocol
 		void sendCyclopediaCharacterBadges();
 		void sendCyclopediaCharacterTitles();
 
+		#if GAME_FEATURE_HIGHSCORES > 0
+		void sendHighscoresNoData();
+		void sendHighscores(std::vector<HighscoreCharacter>& characters, uint8_t categoryId, uint32_t vocationId, uint16_t page, uint16_t pages);
+		#endif
+
 		void sendTournamentLeaderboard();
 
 		void updateCreatureData(const Creature* creature);
@@ -303,6 +331,9 @@ class ProtocolGame final : public Protocol
 		void sendMarketBrowseOwnHistory(const HistoryMarketOfferList& buyOffers, const HistoryMarketOfferList& sellOffers);
 		void sendMarketDetail(uint16_t itemId);
 		#endif
+		#if GAME_FEATURE_ANALYTICS > 0
+		void sendMarketStatistics();
+		#endif
 		void sendTradeItemRequest(const std::string& traderName, const Item* item, bool ack);
 		void sendCloseTrade();
 
@@ -326,6 +357,10 @@ class ProtocolGame final : public Protocol
 		void sendWorldLight(LightInfo lightInfo);
 		#if CLIENT_VERSION >= 1121
 		void sendTibiaTime(int32_t time);
+		#endif
+		#if GAME_FEATURE_STASH > 0
+		void sendSupplyStash(std::map<uint16_t, uint32_t>& supplyStashItems);
+		void sendSpecialContainersAvailable(bool supplyStashAvailable, bool marketAvailable);
 		#endif
 
 		void sendCreatureSquare(const Creature* creature, SquareColor_t color);
@@ -420,7 +455,7 @@ class ProtocolGame final : public Protocol
 		std::unordered_set<uint32_t> knownCreatureSet;
 		Player* player = nullptr;
 
-		uint32_t eventConnect = 0;
+		uint64_t eventConnect = 0;
 		uint32_t challengeTimestamp = 0;
 		uint16_t version = CLIENT_VERSION;
 

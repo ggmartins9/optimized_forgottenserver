@@ -28,8 +28,8 @@
 #include "enums.h"
 #include "creatureevent.h"
 
-using ConditionList = std::list<Condition*>;
-using CreatureEventList = std::list<CreatureEvent*>;
+using ConditionList = std::vector<Condition*>;
+using CreatureEventList = std::vector<CreatureEvent*>;
 
 enum slots_t : uint8_t {
 	CONST_SLOT_WHEREEVER = 0,
@@ -59,7 +59,7 @@ enum slots_t : uint8_t {
 
 struct FindPathParams {
 	bool fullPathSearch = true;
-	bool clearSight = true;
+	bool clearSight = false;
 	bool allowDiagonal = true;
 	bool keepDistance = false;
 	int32_t maxSearchDist = 0;
@@ -213,7 +213,10 @@ class Creature : virtual public Thing
 		void setSpeed(int32_t varSpeedDelta) {
 			int32_t oldSpeed = getSpeed();
 			varSpeed = varSpeedDelta;
-
+			
+			#if GAME_FEATURE_NEWSPEED_LAW > 0
+			cacheSpeed();
+			#endif
 			if (getSpeed() <= 0) {
 				stopEventWalk();
 				cancelNextWalk = true;
@@ -221,6 +224,20 @@ class Creature : virtual public Thing
 				addEventWalk();
 			}
 		}
+
+		#if GAME_FEATURE_NEWSPEED_LAW > 0
+		void cacheSpeed() {
+			int32_t stepSpeed = getStepSpeed();
+			if (stepSpeed > -Creature::speedB) {
+				cachedFormulatedSpeed = std::floor((Creature::speedA * std::log((stepSpeed / 2) + Creature::speedB) + Creature::speedC) + 0.5);
+				if (cachedFormulatedSpeed == 0) {
+					cachedFormulatedSpeed = 1;
+				}
+			} else {
+				cachedFormulatedSpeed = 1;
+			}
+		}
+		#endif
 
 		void setBaseSpeed(uint32_t newBaseSpeed) {
 			baseSpeed = newBaseSpeed;
@@ -295,7 +312,7 @@ class Creature : virtual public Thing
 			return master;
 		}
 
-		const std::list<Creature*>& getSummons() const {
+		const std::vector<Creature*>& getSummons() const {
 			return summons;
 		}
 
@@ -486,7 +503,7 @@ class Creature : virtual public Thing
 		using CountMap = std::map<uint32_t, CountBlock_t>;
 		CountMap damageMap;
 
-		std::list<Creature*> summons;
+		std::vector<Creature*> summons;
 		CreatureEventList eventsList;
 		ConditionList conditions;
 
@@ -496,12 +513,15 @@ class Creature : virtual public Thing
 		Creature* attackedCreature = nullptr;
 		Creature* master = nullptr;
 		Creature* followCreature = nullptr;
+		uint64_t eventWalk = 0;
 
 		uint64_t lastStep = 0;
 		uint32_t referenceCounter = 0;
 		uint32_t id = 0;
 		uint32_t scriptEventsBitField = 0;
-		uint32_t eventWalk = 0;
+		#if GAME_FEATURE_NEWSPEED_LAW > 0
+		uint32_t cachedFormulatedSpeed = 1;
+		#endif
 		uint32_t walkUpdateTicks = 0;
 		uint32_t lastHitCreatureId = 0;
 		uint32_t blockCount = 0;
@@ -539,7 +559,13 @@ class Creature : virtual public Thing
 		bool hasEventRegistered(CreatureEventType_t event) const {
 			return (0 != (scriptEventsBitField & (static_cast<uint32_t>(1) << event)));
 		}
+		void resetEventsRegistered() {
+			scriptEventsBitField = 0;
+		}
 		CreatureEventList getCreatureEvents(CreatureEventType_t type);
+		CreatureEventList& getCreatureEvents() {
+			return eventsList;
+		}
 
 		void updateMapCache();
 		void updateTileCache(const Tile* tile, int32_t dx, int32_t dy);

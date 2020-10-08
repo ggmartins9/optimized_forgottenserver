@@ -169,11 +169,11 @@ uint32_t Container::getWeight() const
 
 std::string Container::getContentDescription() const
 {
-	std::ostringstream os;
-	return getContentDescription(os).str();
+	std::stringExtended sink(1024);
+	return getContentDescription(sink);
 }
 
-std::ostringstream& Container::getContentDescription(std::ostringstream& os) const
+std::string& Container::getContentDescription(std::stringExtended& sink) const
 {
 	bool firstitem = true;
 	for (ContainerIterator it = iterator(); it.hasNext(); it.advance()) {
@@ -187,20 +187,20 @@ std::ostringstream& Container::getContentDescription(std::ostringstream& os) con
 		if (firstitem) {
 			firstitem = false;
 		} else {
-			os << ", ";
+			sink << ", ";
 		}
 
 		#if CLIENT_VERSION >= 1200
-		os << "{" << item->getClientID() << "|" << item->getNameDescription() << "}";
+		sink << '{' << item->getClientID() << '|' << item->getNameDescription() << '}';
 		#else
-		os << item->getNameDescription();
+		sink << item->getNameDescription();
 		#endif
 	}
 
 	if (firstitem) {
-		os << "nothing";
+		sink << "nothing";
 	}
-	return os;
+	return sink;
 }
 
 Item* Container::getItemByIndex(size_t index) const
@@ -706,8 +706,17 @@ void Container::internalAddThing(uint32_t, Thing* thing)
 
 void Container::startDecaying()
 {
+	g_game.startDecay(this);
 	for (ContainerIterator it = iterator(); it.hasNext(); it.advance()) {
 		g_game.startDecay(*it);
+	}
+}
+
+void Container::stopDecaying()
+{
+	g_game.stopDecay(this);
+	for (ContainerIterator it = iterator(); it.hasNext(); it.advance()) {
+		g_game.stopDecay(*it);
 	}
 }
 
