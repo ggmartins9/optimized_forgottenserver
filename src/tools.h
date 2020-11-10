@@ -96,7 +96,7 @@ const char* getReturnMessage(ReturnValue value);
 
 int64_t OTSYS_TIME();
 
-SpellGroup_t stringToSpellGroup(std::string value);
+SpellGroup_t stringToSpellGroup(const std::string& value);
 
 #if defined(__SSE4_2__)
 int tfs_strncmp(const char* s1, const char* s2, size_t n);
@@ -106,7 +106,7 @@ int tfs_strcmp(const char* s1, const char* s2);
 #define tfs_strcmp strcmp
 #endif
 
-constexpr double fast_pow(double base, uint32_t exp) {
+static inline double fast_pow(double base, uint32_t exp) {
 	double result = 1.0;
 	while (exp) {
 		if (exp & 1) {

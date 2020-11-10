@@ -22,6 +22,10 @@
 
 #include "definitions.h"
 
+#if CLIENT_VERSION <= 860
+#define GAME_FEATURE_RULEVIOLATION 1
+#endif
+
 #if CLIENT_VERSION >= 770
 #define GAME_FEATURE_XTEA 1
 #define GAME_FEATURE_RSA1024 1
@@ -289,6 +293,15 @@
 #define GAME_FEATURE_HIGHSCORES 1
 #endif
 
+#if CLIENT_VERSION >= 1252
+#undef GAME_FEATURE_ITEM_ANIMATION_PHASES
+#endif
+
+#if CLIENT_VERSION >= 1260
+#define GAME_FEATURE_MOUNT_COLORS 1
+#define GAME_FEATURE_FAMILIARS 1
+#endif
+
 //robinhood hash map is faster variant of hash map than std::unordered_map but it depends on std::unordered_map implementation
 //compared with visual studio stl library it is at least 2x faster
 #define GAME_FEATURE_ROBINHOOD_HASH_MAP 0
@@ -296,5 +309,9 @@
 //Xiaolin Wu's line algorithm for isSightClear - it seems cipsoft use this algorithm or at least something very similar
 //if disabled it'll fallback to Bresenham's line algorithm
 #define GAME_FEATURE_XIAOLIN_WU_SIGHT_CLEAR 1
+
+//Up-to 1000x faster map cleaning but since it omits lua script checks you might want to disable it when you use some systems
+//that require item movement scripts
+#define GAME_FEATURE_FASTER_CLEAN 1
 
 #endif

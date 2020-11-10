@@ -68,8 +68,13 @@ void ProtocolGame::login(const std::string& accountName, const std::string& pass
 #endif
 {
 	//dispatcher thread
+	auto connection = getConnection();
+	if (!connection) {
+		return;
+	}
+
 	BanInfo banInfo;
-	if (IOBan::isIpBanned(getIP(), banInfo)) {
+	if (IOBan::isIpBanned(connection->getIP(), banInfo)) {
 		if (banInfo.reason.empty()) {
 			banInfo.reason = "(none)";
 		}
@@ -365,6 +370,13 @@ void ProtocolGame::onRecvFirstMessage(NetworkMessage& msg)
 	}
 
 	std::string characterName = msg.getString();
+	#if CLIENT_VERSION >= 1252
+	if (operatingSystem == CLIENTOS_NEW_LINUX) {
+		//TODO: check what new info for linux is send
+		msg.getString();
+		msg.getString();
+	}
+	#endif
 	#else
 	#if GAME_FEATURE_ACCOUNT_NAME > 0
 	std::string accountName = msg.getString();
@@ -564,6 +576,11 @@ void ProtocolGame::parsePacket(NetworkMessage& msg)
 		case 0x98: parseOpenChannel(msg); break;
 		case 0x99: parseCloseChannel(msg); break;
 		case 0x9A: parseOpenPrivateChannel(msg); break;
+		#if GAME_FEATURE_RULEVIOLATION > 0
+		case 0x9B: parseProcessRuleViolation(msg); break;
+		case 0x9C: parseCloseRuleViolation(msg); break;
+		case 0x9D: g_game.playerCancelRuleViolation(player); break;
+		#endif
 		case 0x9E: g_game.playerCloseNpcChannel(player); break;
 		case 0xA0: parseFightModes(msg); break;
 		case 0xA1: parseAttack(msg); break;
@@ -613,7 +630,11 @@ void ProtocolGame::parsePacket(NetworkMessage& msg)
 		case 0xE3: parseCyclopediaRace(msg); break;
 		case 0xE5: parseCyclopediaCharacterInfo(msg); break;
 		case 0xE6: parseBugReport(msg); break;
+		#if GAME_FEATURE_RULEVIOLATION > 0
+		case 0xE7: parseRuleViolation(msg); break;
+		#else
 		case 0xE7: /* thank you */ break;
+		#endif
 		case 0xE8: parseDebugAssert(msg); break;
 		case 0xF0: g_game.playerShowQuestLog(player); break;
 		case 0xF1: parseQuestLine(msg); break;
@@ -898,6 +919,24 @@ void ProtocolGame::parseOpenPrivateChannel(NetworkMessage& msg)
 	}
 }
 
+#if GAME_FEATURE_RULEVIOLATION > 0
+void ProtocolGame::parseProcessRuleViolation(NetworkMessage& msg)
+{
+	std::string target = msg.getString();
+	if (!target.empty() && target.length() <= NETWORKMESSAGE_PLAYERNAME_MAXLENGTH) {
+		g_game.playerProcessRuleViolation(player, target);
+	}
+}
+
+void ProtocolGame::parseCloseRuleViolation(NetworkMessage& msg)
+{
+	std::string target = msg.getString();
+	if (!target.empty() && target.length() <= NETWORKMESSAGE_PLAYERNAME_MAXLENGTH) {
+		g_game.playerCloseRuleViolation(player, target);
+	}
+}
+#endif
+
 #if GAME_FEATURE_STASH > 0
 void ProtocolGame::parseStashAction(NetworkMessage& msg)
 {
@@ -989,21 +1028,27 @@ void ProtocolGame::parseSetOutfit(NetworkMessage& msg)
 	#else
 	newOutfit.lookType = msg.getByte();
 	#endif
-	newOutfit.lookHead = msg.getByte();
-	newOutfit.lookBody = msg.getByte();
-	newOutfit.lookLegs = msg.getByte();
-	newOutfit.lookFeet = msg.getByte();
+	newOutfit.lookHead = std::min<uint8_t>(132, msg.getByte());
+	newOutfit.lookBody = std::min<uint8_t>(132, msg.getByte());
+	newOutfit.lookLegs = std::min<uint8_t>(132, msg.getByte());
+	newOutfit.lookFeet = std::min<uint8_t>(132, msg.getByte());
 	newOutfit.lookAddons = msg.getByte();
 	if (outfitType == 0) {
 		#if GAME_FEATURE_MOUNTS > 0
 		newOutfit.lookMount = msg.get<uint16_t>();
 		#endif
+		#if GAME_FEATURE_MOUNT_COLORS > 0
+		newOutfit.lookMountHead = std::min<uint8_t>(132, msg.getByte());
+		newOutfit.lookMountBody = std::min<uint8_t>(132, msg.getByte());
+		newOutfit.lookMountLegs = std::min<uint8_t>(132, msg.getByte());
+		newOutfit.lookMountFeet = std::min<uint8_t>(132, msg.getByte());
+		#endif
+		#if GAME_FEATURE_FAMILIARS > 0
+		msg.get<uint16_t>();//Familiar looktype
+		#endif
 	} else if (outfitType == 1) {
 		//This value probably has something to do with try outfit variable inside outfit window dialog
 		//if try outfit is set to 2 it expects uint32_t value after mounted and disable mounts from outfit window dialog
-		#if GAME_FEATURE_MOUNTS > 0
-		newOutfit.lookMount = 0;
-		#endif
 		msg.get<uint32_t>();
 	}
 	g_game.playerChangeOutfit(player, newOutfit);
@@ -1112,6 +1157,9 @@ void ProtocolGame::parseSay(NetworkMessage& msg)
 	switch (type) {
 		case TALKTYPE_PRIVATE_TO:
 		case TALKTYPE_PRIVATE_RED_TO:
+		#if GAME_FEATURE_RULEVIOLATION > 0
+		case TALKTYPE_RVR_ANSWER:
+		#endif
 			receiver = msg.getString();
 			channelId = 0;
 			break;
@@ -1393,6 +1441,10 @@ void ProtocolGame::parseHighscores(NetworkMessage& msg)
 	uint32_t vocation = msg.get<uint32_t>();
 	uint16_t page = 1;
 	const std::string worldName = msg.getString();
+	#if CLIENT_VERSION >= 1260
+	msg.getByte();//Game World Category
+	msg.getByte();//BattlEye World Type
+	#endif
 	if (type == HIGHSCORE_GETENTRIES) {
 		page = msg.get<uint16_t>();
 	}
@@ -1442,6 +1494,29 @@ void ProtocolGame::parseBugReport(NetworkMessage& msg)
 
 	g_game.playerReportBug(player, message, position, category);
 }
+
+#if GAME_FEATURE_RULEVIOLATION > 0
+void ProtocolGame::parseRuleViolation(NetworkMessage& msg)
+{
+	#if CLIENT_VERSION >= 772
+	std::string target = msg.getString();
+	uint8_t reason = msg.getByte();
+	uint8_t action = msg.getByte();
+	std::string comment = msg.getString();
+	uint32_t statementId = msg.get<uint32_t>();
+	bool ipBanishment = msg.getByte();
+	#else
+	std::string target = msg.getString();
+	uint8_t reason = msg.getByte();
+	std::string comment = msg.getString();
+	uint8_t action = msg.getByte();
+	uint32_t statementId = 0;
+	bool ipBanishment = msg.getByte();
+	#endif
+
+	g_game.playerRuleViolation(player, target, comment, reason, action, statementId, ipBanishment);
+}
+#endif
 
 void ProtocolGame::parseDebugAssert(NetworkMessage& msg)
 {
@@ -1654,6 +1729,14 @@ void ProtocolGame::sendCreatureOutfit(const Creature* creature, const Outfit_t& 
 	AddOutfit(outfit);
 	#if GAME_FEATURE_MOUNTS > 0
 	playermsg.add<uint16_t>(outfit.lookMount);
+	#endif
+	#if GAME_FEATURE_MOUNT_COLORS > 0
+	if (outfit.lookMount != 0) {
+		playermsg.addByte(outfit.lookMountHead);
+		playermsg.addByte(outfit.lookMountBody);
+		playermsg.addByte(outfit.lookMountLegs);
+		playermsg.addByte(outfit.lookMountFeet);
+	}
 	#endif
 	writeToOutputBuffer(playermsg);
 }
@@ -2079,10 +2162,10 @@ void ProtocolGame::sendCyclopediaRace(uint16_t monsterId)
 					bool monsterHaveActiveCharm = false;
 					playermsg.addByte((monsterHaveActiveCharm ? 0x01 : 0x00));
 					if (monsterHaveActiveCharm) {
-						playermsg.addByte(0); // ??
-						playermsg.add<uint32_t>(0); // ??
+						playermsg.addByte(0); // charmId
+						playermsg.add<uint32_t>(0); // charmRemoveCost
 					} else {
-						playermsg.addByte(0); // ??
+						playermsg.addByte(0); // canSetCharm - bool
 					}
 				}
 				writeToOutputBuffer(playermsg);
@@ -2328,7 +2411,7 @@ void ProtocolGame::sendCyclopediaCharacterOutfitsMounts()
 		if (!player->getOutfitAddons(outfit, addons)) {
 			continue;
 		}
-		outfitSize++;
+		++outfitSize;
 
 		playermsg.add<uint16_t>(outfit.lookType);
 		playermsg.addString(outfit.name);
@@ -2356,7 +2439,7 @@ void ProtocolGame::sendCyclopediaCharacterOutfitsMounts()
 		#else
 		if (true) {
 		#endif
-			mountSize++;
+			++mountSize;
 
 			playermsg.add<uint16_t>(mount.clientId);
 			playermsg.addString(mount.name);
@@ -2364,6 +2447,18 @@ void ProtocolGame::sendCyclopediaCharacterOutfitsMounts()
 			playermsg.add<uint32_t>(1000);
 		}
 	}
+	#if GAME_FEATURE_MOUNT_COLORS > 0
+	if (mountSize > 0) {
+		playermsg.addByte(currentOutfit.lookMountHead);
+		playermsg.addByte(currentOutfit.lookMountBody);
+		playermsg.addByte(currentOutfit.lookMountLegs);
+		playermsg.addByte(currentOutfit.lookMountFeet);
+	}
+	#endif
+
+	#if GAME_FEATURE_FAMILIARS > 0
+	playermsg.add<uint16_t>(0);
+	#endif
 
 	playermsg.setBufferPosition(startOutfits);
 	playermsg.add<uint16_t>(outfitSize);
@@ -2497,6 +2592,11 @@ void ProtocolGame::sendHighscores(std::vector<HighscoreCharacter>& characters, u
 	playermsg.addByte(1); // Worlds
 	playermsg.addString(g_config.getString(ConfigManager::SERVER_NAME)); // First World
 	playermsg.addString(g_config.getString(ConfigManager::SERVER_NAME)); // Selected World
+
+	#if CLIENT_VERSION >= 1260
+	playermsg.addByte(0xFF);//Game World Category: 0xFF(-1) - Selected World
+	playermsg.addByte(0xFF);//BattlEye World Type
+	#endif
 
 	auto vocationPosition = playermsg.getBufferPosition();
 	uint8_t vocations = 1;
@@ -2822,6 +2922,79 @@ void ProtocolGame::sendChannel(uint16_t channelId, const std::string& channelNam
 	#endif
 	writeToOutputBuffer(playermsg);
 }
+
+#if GAME_FEATURE_RULEVIOLATION > 0
+void ProtocolGame::sendRuleViolationChannel(uint16_t channelId)
+{
+	playermsg.reset();
+	playermsg.addByte(0xAE);
+	playermsg.add<uint16_t>(channelId);
+	writeToOutputBuffer(playermsg);
+
+	auto& ruleViolations = g_game.getRuleViolations();
+	for (auto it = ruleViolations.begin(); it != ruleViolations.end();) {
+		RuleViolation& rvr = it->second;
+		if (Player* owner = g_game.getPlayerByID(rvr.owner)) {
+			if (rvr.gamemaster == 0) {
+				sendChannelMessage(owner, rvr.message, TALKTYPE_RVR_CHANNEL, ((OTSYS_TIME() - rvr.time) / 1000) & 0xFFFFFFFF);
+			}
+
+			++it;
+		} else {
+			it = ruleViolations.erase(it);
+		}
+	}
+}
+
+void ProtocolGame::sendRuleViolationRemove(const std::string& target)
+{
+	playermsg.reset();
+	playermsg.addByte(0xAF);
+	playermsg.addString(target);
+	writeToOutputBuffer(playermsg);
+}
+
+void ProtocolGame::sendRuleViolationCancel(const std::string& target)
+{
+	playermsg.reset();
+	playermsg.addByte(0xB0);
+	playermsg.addString(target);
+	writeToOutputBuffer(playermsg);
+}
+
+void ProtocolGame::sendRuleViolationLock()
+{
+	playermsg.reset();
+	playermsg.addByte(0xB1);
+	writeToOutputBuffer(playermsg);
+}
+
+void ProtocolGame::sendChannelMessage(const Player* target, const std::string& text, SpeakClasses type, uint32_t time)
+{
+	uint8_t talkType = translateSpeakClassToClient(type);
+	if (talkType == TALKTYPE_NONE) {
+		return;
+	}
+
+	playermsg.reset();
+	playermsg.addByte(0xAA);
+	#if GAME_FEATURE_MESSAGE_STATEMENT > 0
+	playermsg.add<uint32_t>(0x00);
+	#endif
+	playermsg.addString(target->getName());
+	#if GAME_FEATURE_MESSAGE_LEVEL > 0
+	playermsg.add<uint16_t>(0x00);
+	#endif
+	playermsg.addByte(talkType);
+	#if CLIENT_VERSION >= 713
+	playermsg.add<uint32_t>(time);
+	#else
+	(void)time;
+	#endif
+	playermsg.addString(text);
+	writeToOutputBuffer(playermsg);
+}
+#endif
 
 void ProtocolGame::sendChannelMessage(const std::string& author, const std::string& text, SpeakClasses type, uint16_t channel)
 {
@@ -3748,6 +3921,29 @@ void ProtocolGame::sendPrivateMessage(const Player* speaker, SpeakClasses type, 
 	playermsg.add<uint32_t>(++statementId);
 	#endif
 	if (speaker) {
+		#if GAME_FEATURE_RULEVIOLATION > 0
+		if (type == TALKTYPE_RVR_ANSWER) {
+			playermsg.addString("Gamemaster");
+			#if CLIENT_VERSION >= 1250
+			if (statementId != 0) {
+				playermsg.addByte(0x00);//(Traded)
+			}
+			#endif
+			#if GAME_FEATURE_MESSAGE_LEVEL > 0
+			playermsg.add<uint16_t>(0);
+			#endif
+		} else {
+			playermsg.addString(speaker->getName());
+			#if CLIENT_VERSION >= 1250
+			if (statementId != 0) {
+				playermsg.addByte(0x00);//(Traded)
+			}
+			#endif
+			#if GAME_FEATURE_MESSAGE_LEVEL > 0
+			playermsg.add<uint16_t>(speaker->getLevel());
+			#endif
+		}
+		#else
 		playermsg.addString(speaker->getName());
 		#if CLIENT_VERSION >= 1250
 		if (statementId != 0) {
@@ -3756,6 +3952,7 @@ void ProtocolGame::sendPrivateMessage(const Player* speaker, SpeakClasses type, 
 		#endif
 		#if GAME_FEATURE_MESSAGE_LEVEL > 0
 		playermsg.add<uint16_t>(speaker->getLevel());
+		#endif
 		#endif
 	} else {
 		playermsg.add<uint16_t>(0x00);
@@ -4200,6 +4397,27 @@ void ProtocolGame::sendAddCreature(const Creature* creature, const Position& pos
 	playermsg.addByte(0x0F); // sendWorldEnter
 	#endif
 
+	#if GAME_FEATURE_RULEVIOLATION > 0
+	if (player->isAccessPlayer()) {
+		playermsg.addByte(0x0B);
+		#if CLIENT_VERSION >= 726 && CLIENT_VERSION <= 730
+		for (int32_t i = 0; i < 30; ++i) {
+		#elif CLIENT_VERSION >= 850
+		for (int32_t i = 0; i < 20; ++i) {
+		#elif CLIENT_VERSION >= 820
+		for (int32_t i = 0; i < 23; ++i) {
+		#else
+		for (int32_t i = 0; i < 32; ++i) {
+		#endif
+			#if CLIENT_VERSION >= 772
+			playermsg.addByte(0x84);
+			#else
+			playermsg.addByte(0x44);
+			#endif
+		}
+	}
+	#endif
+
 	//gameworld settings
 	AddWorldLight(g_game.getWorldLightInfo());
 
@@ -4497,6 +4715,16 @@ void ProtocolGame::sendOutfitWindow()
 	#if GAME_FEATURE_MOUNTS > 0
 	playermsg.add<uint16_t>(currentOutfit.lookMount);
 	#endif
+	#if GAME_FEATURE_MOUNT_COLORS > 0
+	playermsg.addByte(currentOutfit.lookMountHead);
+	playermsg.addByte(currentOutfit.lookMountBody);
+	playermsg.addByte(currentOutfit.lookMountLegs);
+	playermsg.addByte(currentOutfit.lookMountFeet);
+	#endif
+
+	#if GAME_FEATURE_FAMILIARS > 0
+	playermsg.add<uint16_t>(0);
+	#endif
 
 	#if GAME_FEATURE_OUTFITS > 0
 	std::vector<ProtocolOutfit> protocolOutfits;
@@ -4554,10 +4782,12 @@ void ProtocolGame::sendOutfitWindow()
 	}
 
 	#if GAME_FEATURE_MOUNTS > 0
-	std::vector<const Mount*> mounts;
-	for (const Mount& mount : g_game.mounts.getMounts()) {
+	std::vector<const Mount*> protocolMounts;
+	const auto& mounts = g_game.mounts.getMounts();
+	protocolMounts.reserve(mounts.size());
+	for (const Mount& mount : mounts) {
 		if (player->hasMount(&mount)) {
-			mounts.push_back(&mount);
+			protocolMounts.push_back(&mount);
 		}
 		#if CLIENT_VERSION < 1062
 		if (mounts.size() == 50) {
@@ -4567,18 +4797,22 @@ void ProtocolGame::sendOutfitWindow()
 	}
 	
 	#if CLIENT_VERSION >= 1185
-	playermsg.add<uint16_t>(mounts.size());
+	playermsg.add<uint16_t>(protocolMounts.size());
 	#else
-	playermsg.addByte(mounts.size());
+	playermsg.addByte(protocolMounts.size());
 	#endif
 
-	for (const Mount* mount : mounts) {
+	for (const Mount* mount : protocolMounts) {
 		playermsg.add<uint16_t>(mount->clientId);
 		playermsg.addString(mount->name);
 		#if CLIENT_VERSION >= 1185
 		playermsg.addByte(0x00);
 		#endif
 	}
+	#endif
+
+	#if GAME_FEATURE_FAMILIARS > 0
+	playermsg.add<uint16_t>(0);
 	#endif
 	
 	#if CLIENT_VERSION >= 1185
@@ -4775,11 +5009,19 @@ void ProtocolGame::AddCreature(const Creature* creature, bool known, uint32_t re
 		#if GAME_FEATURE_MOUNTS > 0
 		playermsg.add<uint16_t>(outfit.lookMount);
 		#endif
+		#if GAME_FEATURE_MOUNT_COLORS > 0
+		if (outfit.lookMount != 0) {
+			playermsg.addByte(outfit.lookMountHead);
+			playermsg.addByte(outfit.lookMountBody);
+			playermsg.addByte(outfit.lookMountLegs);
+			playermsg.addByte(outfit.lookMountFeet);
+		}
+		#endif
 	} else {
 		static Outfit_t outfit;
 		AddOutfit(outfit);
 		#if GAME_FEATURE_MOUNTS > 0
-		playermsg.add<uint16_t>(outfit.lookMount);
+		playermsg.add<uint16_t>(0);
 		#endif
 	}
 

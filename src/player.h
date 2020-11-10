@@ -798,6 +798,11 @@ class Player final : public Creature, public Cylinder
 				client->sendUpdateTile(tile, pos);
 			}
 		}
+		void sendMapDescription() {
+			if (client) {
+				client->sendMapDescription(getPosition());
+			}
+		}
 
 		void sendChannelMessage(const std::string& author, const std::string& text, SpeakClasses type, uint16_t channel) {
 			if (client) {
@@ -1255,6 +1260,33 @@ class Player final : public Creature, public Cylinder
 				client->sendChannel(channelId, channelName, channelUsers, invitedUsers);
 			}
 		}
+		#if GAME_FEATURE_RULEVIOLATION > 0
+		void sendRuleViolationChannel(uint16_t channelId) {
+			if (client) {
+				client->sendRuleViolationChannel(channelId);
+			}
+		}
+		void sendRuleViolationRemove(const std::string& target) {
+			if (client) {
+				client->sendRuleViolationRemove(target);
+			}
+		}
+		void sendRuleViolationCancel(const std::string& target) {
+			if (client) {
+				client->sendRuleViolationCancel(target);
+			}
+		}
+		void sendRuleViolationLock() {
+			if (client) {
+				client->sendRuleViolationLock();
+			}
+		}
+		void sendChannelMessage(const Player* target, const std::string& text, SpeakClasses type, uint32_t time) {
+			if (client) {
+				client->sendChannelMessage(target, text, type, time);
+			}
+		}
+		#endif
 		void sendTutorial(uint8_t tutorialId) {
 			if (client) {
 				client->sendTutorial(tutorialId);

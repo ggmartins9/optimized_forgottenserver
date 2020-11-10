@@ -193,30 +193,28 @@ bool Map::placeCreature(const Position& centerPos, Creature* creature, bool exte
 	}
 
 	if (!foundTile) {
-		static std::vector<std::pair<int32_t, int32_t>> extendedRelList {
-			                   {0, -2},
-			         {-1, -1}, {0, -1}, {1, -1},
-			{-2, 0}, {-1,  0},          {1,  0}, {2, 0},
-			         {-1,  1}, {0,  1}, {1,  1},
-			                   {0,  2}
-		};
-
-		static std::vector<std::pair<int32_t, int32_t>> normalRelList {
+		static std::array<std::pair<int32_t, int32_t>, 12> relList { {
 			{-1, -1}, {0, -1}, {1, -1},
 			{-1,  0},          {1,  0},
-			{-1,  1}, {0,  1}, {1,  1}
-		};
+			{-1,  1}, {0,  1}, {1,  1},
 
-		std::vector<std::pair<int32_t, int32_t>>& relList = (extendedPos ? extendedRelList : normalRelList);
+					  {0, -2},
+			{-2, 0},           {2, 0},
+					  {0,  2}
+		} };
 
+		size_t relListCount;
 		if (extendedPos) {
-			std::shuffle(relList.begin(), relList.begin() + 4, getRandomGenerator());
-			std::shuffle(relList.begin() + 4, relList.end(), getRandomGenerator());
+			relListCount = 12;
+			std::shuffle(relList.begin(), relList.begin() + 8, getRandomGenerator());
+			std::shuffle(relList.begin() + 8, relList.end(), getRandomGenerator());
 		} else {
-			std::shuffle(relList.begin(), relList.end(), getRandomGenerator());
+			relListCount = 8;
+			std::shuffle(relList.begin(), relList.begin() + 8, getRandomGenerator());
 		}
 
-		for (const auto& it : relList) {
+		for (size_t i = 0; i < relListCount; ++i) {
+			const auto& it = relList[i];
 			Position tryPos(centerPos.x + it.first, centerPos.y + it.second, centerPos.z);
 
 			tile = getTile(tryPos.x, tryPos.y, tryPos.z);
@@ -757,15 +755,9 @@ bool Map::isSightClear(const Position& fromPos, const Position& toPos, bool floo
 		return false;
 	}
 
-	// Perform checking destination first
-	const Tile* tile = getTile(toPos.x, toPos.y, (fromPos.z > toPos.z ? toPos.z : fromPos.z));
-	if (tile && tile->hasFlag(TILESTATE_BLOCKPROJECTILE)) {
-		return false;
-	} else {
-		// Check if we even need to perform line checking
-		if (fromPos.z == toPos.z && Position::areInRange<1, 1>(fromPos, toPos)) {
-			return true;
-		}
+	// Check if we even need to perform line checking
+	if (fromPos.z == toPos.z && Position::areInRange<1, 1>(fromPos, toPos)) {
+		return true;
 	}
 
 	// Cast two converging rays and see if either yields a result.
@@ -1498,9 +1490,18 @@ uint32_t Map::clean() const
 
 	size_t count = toRemove.size();
 	for (Item* item : toRemove) {
-		g_game.internalRemoveItem(item, -1);
+		#if GAME_FEATURE_FASTER_CLEAN > 0
+		g_game.internalCleanItem(item);
+		#else
+		g_game.internalRemoveItem(item);
+		#endif
 	}
-	toRemove.clear();
+
+	#if GAME_FEATURE_FASTER_CLEAN > 0
+	for (const auto& it : g_game.getPlayers()) {
+		it.second->sendMapDescription();
+	}
+	#endif
 
 	if (g_game.getGameState() == GAME_STATE_MAINTAIN) {
 		g_game.setGameState(GAME_STATE_NORMAL);

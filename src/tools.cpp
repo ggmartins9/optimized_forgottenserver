@@ -530,11 +530,11 @@ StringVector explodeString(const std::string& inString, const std::string& separ
 	StringVector returnVector;
 	std::string::size_type start = 0, end = 0;
 	while (--limit != -1 && (end = inString.find(separator, start)) != std::string::npos) {
-		returnVector.push_back(inString.substr(start, end - start));
+		returnVector.emplace_back(std::move(inString.substr(start, end - start)));
 		start = end + separator.size();
 	}
 
-	returnVector.push_back(inString.substr(start));
+	returnVector.emplace_back(std::move(inString.substr(start)));
 	return returnVector;
 }
 
@@ -1641,7 +1641,7 @@ int64_t OTSYS_TIME()
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-SpellGroup_t stringToSpellGroup(std::string value)
+SpellGroup_t stringToSpellGroup(const std::string& value)
 {
 	std::string tmpStr = asLowerCaseString(value);
 	if (!tfs_strcmp(tmpStr.c_str(), "attack") || !tfs_strcmp(tmpStr.c_str(), "1")) {
